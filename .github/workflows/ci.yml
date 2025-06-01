@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+
+  # When a commit is pushed
+  push:
+
+permissions:
+  contents: read # To clone the repository
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Check the format
+        run: npm run format
+
+      - name: Check the types
+        run: npm run typecheck
+
+      - name: Lint the package
+        run: npm run lint
+
+      - name: Test the package
+        run: npm run test
+
+      - name: Clean the output directory
+        run: npm run clean
+
+      - name: Build the package
+        run: npm run build
+
+      - name: Compare the output directory
+        id: diff
+        run: |
+          if [ "$(git diff --ignore-space-at-eol --text dist/ | wc -l)" -gt "0" ]; then
+            echo "Detected uncommitted changes after build. See status below:"
+            git diff --ignore-space-at-eol --text dist/
+            exit 1
+          fi
+
+      - if: ${{ failure() && steps.diff.outcome == 'failure' }}
+        name: Upload the output directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  test:
+    needs: build
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Run the action
+        id: run-action
+        uses: ./
+        with:
+          milliseconds: 1000
+
+      - name: Print the output
+        run: echo "${{ steps.run-action.outputs.time }}"
