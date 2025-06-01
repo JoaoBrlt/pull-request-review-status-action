@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Tests
+coverage/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Eclipse
+.settings
+.project
+
+# VSCode
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db

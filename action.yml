@@ -1,0 +1,53 @@
+name: Pull Request Review Status Action
+description: GitHub Action to label pull requests depending on their code review status.
+author: João Brilhante
+
+branding:
+  icon: lock
+  color: blue
+
+inputs:
+  # Common
+  github-token:
+    description: The GitHub token used to authenticate with the GitHub API.
+    required: true
+  run-mode:
+    description: The run mode (can be "label" or "report").
+    required: true
+  required-approvals:
+    description: The required number of approvals to approve a PR.
+    required: false
+    default: "1"
+
+  # Label
+  pull-number:
+    description: The number of the pull request to label.
+    required: false
+  pending-review-label:
+    description: The label to use when a PR is pending review.
+    required: false
+    default: Pending review
+  changes-requested-label:
+    description: The label to use when a PR needs changes.
+    required: false
+    default: Changes requested
+  approved-label:
+    description: The label to use when a PR is approved.
+    required: false
+    default: Approved
+
+  # Report
+  slack-token:
+    description: The Slack API token used to authenticate with the Slack API.
+    required: false
+  slack-channel:
+    description: The Slack channel on which to send reports.
+    required: false
+  stale-days:
+    description: The number of days after which a pull request should be considered stale.
+    required: false
+    default: "7"
+
+runs:
+  using: node20
+  main: dist/index.js
