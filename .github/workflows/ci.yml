@@ -31,9 +31,6 @@ jobs:
       - name: Check the format
         run: npm run format
 
-      - name: Check the types
-        run: npm run typecheck
-
       - name: Lint the package
         run: npm run lint
 

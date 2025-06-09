@@ -1,13 +1,14 @@
-module.exports = {
+export default {
     verbose: true,
     clearMocks: true,
-    collectCoverageFrom: ["src/**/*.ts"],
     testEnvironment: "node",
-    testMatch: ["**/*.test.ts"],
+    testMatch: ["**/*.test.{js,ts}"],
     testPathIgnorePatterns: ["/node_modules/", "/dist/"],
-    moduleFileExtensions: ["ts", "js"],
+    moduleFileExtensions: ["js", "ts", "json"],
     transform: {
         "^.+\\.ts$": "ts-jest",
     },
-    watchPlugins: ["jest-watch-typeahead/filename", "jest-watch-typeahead/testname"],
+    collectCoverageFrom: ["src/**/*.{js,ts}"],
+    coverageDirectory: "coverage",
+    coverageReporters: ["text", "lcov", "html"],
 };

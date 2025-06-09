@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import * as main from "../src/main";
+import * as main from "./main";
 
 const runMock = jest.spyOn(main, "run");
 
