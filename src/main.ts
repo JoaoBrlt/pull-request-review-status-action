@@ -163,60 +163,6 @@ function getReviewStatus(
     return PullRequestReviewStatus.PENDING_REVIEW;
 }
 
-async function labelPullRequest(
-    octokit: OctokitClient,
-    owner: string,
-    repo: string,
-    pullNumber: number,
-    reviewStatus: PullRequestReviewStatus,
-    pendingReviewLabel: string,
-    changesRequestedLabel: string,
-    approvedLabel: string,
-) {
-    switch (reviewStatus) {
-        case PullRequestReviewStatus.DRAFT:
-            await setPullRequestLabels(
-                octokit,
-                owner,
-                repo,
-                pullNumber,
-                [],
-                [pendingReviewLabel, changesRequestedLabel, approvedLabel],
-            );
-            break;
-        case PullRequestReviewStatus.PENDING_REVIEW:
-            await setPullRequestLabels(
-                octokit,
-                owner,
-                repo,
-                pullNumber,
-                [pendingReviewLabel],
-                [changesRequestedLabel, approvedLabel],
-            );
-            break;
-        case PullRequestReviewStatus.CHANGES_REQUESTED:
-            await setPullRequestLabels(
-                octokit,
-                owner,
-                repo,
-                pullNumber,
-                [changesRequestedLabel],
-                [pendingReviewLabel, approvedLabel],
-            );
-            break;
-        case PullRequestReviewStatus.APPROVED:
-            await setPullRequestLabels(
-                octokit,
-                owner,
-                repo,
-                pullNumber,
-                [approvedLabel],
-                [pendingReviewLabel, changesRequestedLabel],
-            );
-            break;
-    }
-}
-
 async function getLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
     const labels = await octokit.paginate(octokit.rest.issues.listLabelsOnIssue, {
         owner: owner,
@@ -274,7 +220,7 @@ async function removeLabels(
     }
 }
 
-async function setPullRequestLabels(
+async function setLabels(
     octokit: OctokitClient,
     owner: string,
     repo: string,
@@ -285,6 +231,60 @@ async function setPullRequestLabels(
     const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
     await addLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToAdd);
     await removeLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToRemove);
+}
+
+async function labelPullRequest(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    reviewStatus: PullRequestReviewStatus,
+    pendingReviewLabel: string,
+    changesRequestedLabel: string,
+    approvedLabel: string,
+) {
+    switch (reviewStatus) {
+        case PullRequestReviewStatus.DRAFT:
+            await setLabels(
+                octokit,
+                owner,
+                repo,
+                pullNumber,
+                [],
+                [pendingReviewLabel, changesRequestedLabel, approvedLabel],
+            );
+            break;
+        case PullRequestReviewStatus.PENDING_REVIEW:
+            await setLabels(
+                octokit,
+                owner,
+                repo,
+                pullNumber,
+                [pendingReviewLabel],
+                [changesRequestedLabel, approvedLabel],
+            );
+            break;
+        case PullRequestReviewStatus.CHANGES_REQUESTED:
+            await setLabels(
+                octokit,
+                owner,
+                repo,
+                pullNumber,
+                [changesRequestedLabel],
+                [pendingReviewLabel, approvedLabel],
+            );
+            break;
+        case PullRequestReviewStatus.APPROVED:
+            await setLabels(
+                octokit,
+                owner,
+                repo,
+                pullNumber,
+                [approvedLabel],
+                [pendingReviewLabel, changesRequestedLabel],
+            );
+            break;
+    }
 }
 
 export async function run(): Promise<void> {

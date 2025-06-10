@@ -31957,22 +31957,6 @@ function getReviewStatus(isDraft, approvedReviews, changesRequestedReviews, unre
     }
     return PullRequestReviewStatus.PENDING_REVIEW;
 }
-async function labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel) {
-    switch (reviewStatus) {
-        case PullRequestReviewStatus.DRAFT:
-            await setPullRequestLabels(octokit, owner, repo, pullNumber, [], [pendingReviewLabel, changesRequestedLabel, approvedLabel]);
-            break;
-        case PullRequestReviewStatus.PENDING_REVIEW:
-            await setPullRequestLabels(octokit, owner, repo, pullNumber, [pendingReviewLabel], [changesRequestedLabel, approvedLabel]);
-            break;
-        case PullRequestReviewStatus.CHANGES_REQUESTED:
-            await setPullRequestLabels(octokit, owner, repo, pullNumber, [changesRequestedLabel], [pendingReviewLabel, approvedLabel]);
-            break;
-        case PullRequestReviewStatus.APPROVED:
-            await setPullRequestLabels(octokit, owner, repo, pullNumber, [approvedLabel], [pendingReviewLabel, changesRequestedLabel]);
-            break;
-    }
-}
 async function getLabels(octokit, owner, repo, pullNumber) {
     const labels = await octokit.paginate(octokit.rest.issues.listLabelsOnIssue, {
         owner: owner,
@@ -32011,10 +31995,26 @@ async function removeLabels(octokit, owner, repo, pullNumber, currentLabels, lab
         }
     }
 }
-async function setPullRequestLabels(octokit, owner, repo, pullNumber, labelsToAdd, labelsToRemove) {
+async function setLabels(octokit, owner, repo, pullNumber, labelsToAdd, labelsToRemove) {
     const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
     await addLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToAdd);
     await removeLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToRemove);
+}
+async function labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel) {
+    switch (reviewStatus) {
+        case PullRequestReviewStatus.DRAFT:
+            await setLabels(octokit, owner, repo, pullNumber, [], [pendingReviewLabel, changesRequestedLabel, approvedLabel]);
+            break;
+        case PullRequestReviewStatus.PENDING_REVIEW:
+            await setLabels(octokit, owner, repo, pullNumber, [pendingReviewLabel], [changesRequestedLabel, approvedLabel]);
+            break;
+        case PullRequestReviewStatus.CHANGES_REQUESTED:
+            await setLabels(octokit, owner, repo, pullNumber, [changesRequestedLabel], [pendingReviewLabel, approvedLabel]);
+            break;
+        case PullRequestReviewStatus.APPROVED:
+            await setLabels(octokit, owner, repo, pullNumber, [approvedLabel], [pendingReviewLabel, changesRequestedLabel]);
+            break;
+    }
 }
 async function run() {
     try {
