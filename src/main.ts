@@ -226,13 +226,28 @@ async function getLabels(octokit: OctokitClient, owner: string, repo: string, pu
     return labels.map((label) => label.name);
 }
 
-async function addLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number, labels: string[]) {
+async function addLabel(octokit: OctokitClient, owner: string, repo: string, pullNumber: number, label: string) {
     await octokit.rest.issues.addLabels({
         owner: owner,
         repo: repo,
         issue_number: pullNumber,
-        labels: labels,
+        labels: [label],
     });
+}
+
+async function addLabels(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    currentLabels: string[],
+    labelsToAdd: string[],
+) {
+    for (const label of labelsToAdd) {
+        if (!currentLabels.includes(label)) {
+            await addLabel(octokit, owner, repo, pullNumber, label);
+        }
+    }
 }
 
 async function removeLabel(octokit: OctokitClient, owner: string, repo: string, pullNumber: number, label: string) {
@@ -244,9 +259,15 @@ async function removeLabel(octokit: OctokitClient, owner: string, repo: string, 
     });
 }
 
-async function removeLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number, labels: string[]) {
-    const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
-    for (const label of labels) {
+async function removeLabels(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    currentLabels: string[],
+    labelsToRemove: string[],
+) {
+    for (const label of labelsToRemove) {
         if (currentLabels.includes(label)) {
             await removeLabel(octokit, owner, repo, pullNumber, label);
         }
@@ -261,8 +282,9 @@ async function setPullRequestLabels(
     labelsToAdd: string[],
     labelsToRemove: string[],
 ) {
-    await addLabels(octokit, owner, repo, pullNumber, labelsToAdd);
-    await removeLabels(octokit, owner, repo, pullNumber, labelsToRemove);
+    const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
+    await addLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToAdd);
+    await removeLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToRemove);
 }
 
 export async function run(): Promise<void> {

@@ -31981,13 +31981,20 @@ async function getLabels(octokit, owner, repo, pullNumber) {
     });
     return labels.map((label) => label.name);
 }
-async function addLabels(octokit, owner, repo, pullNumber, labels) {
+async function addLabel(octokit, owner, repo, pullNumber, label) {
     await octokit.rest.issues.addLabels({
         owner: owner,
         repo: repo,
         issue_number: pullNumber,
-        labels: labels,
+        labels: [label],
     });
+}
+async function addLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToAdd) {
+    for (const label of labelsToAdd) {
+        if (!currentLabels.includes(label)) {
+            await addLabel(octokit, owner, repo, pullNumber, label);
+        }
+    }
 }
 async function removeLabel(octokit, owner, repo, pullNumber, label) {
     await octokit.rest.issues.removeLabel({
@@ -31997,17 +32004,17 @@ async function removeLabel(octokit, owner, repo, pullNumber, label) {
         name: label,
     });
 }
-async function removeLabels(octokit, owner, repo, pullNumber, labels) {
-    const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
-    for (const label of labels) {
+async function removeLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToRemove) {
+    for (const label of labelsToRemove) {
         if (currentLabels.includes(label)) {
             await removeLabel(octokit, owner, repo, pullNumber, label);
         }
     }
 }
 async function setPullRequestLabels(octokit, owner, repo, pullNumber, labelsToAdd, labelsToRemove) {
-    await addLabels(octokit, owner, repo, pullNumber, labelsToAdd);
-    await removeLabels(octokit, owner, repo, pullNumber, labelsToRemove);
+    const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
+    await addLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToAdd);
+    await removeLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToRemove);
 }
 async function run() {
     try {
