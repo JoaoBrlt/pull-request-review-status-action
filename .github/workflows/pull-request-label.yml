@@ -33,7 +33,7 @@ jobs:
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ inputs.pull_request_number || github.event.pull_request.number }}
+          pull-number: ${{ inputs.pull_request_number || github.event.pull_request.number }}
           pending-review-label: Pending review
           changes-requested-label: Changes requested
           approved-label: Approved
