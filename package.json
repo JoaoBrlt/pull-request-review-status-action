@@ -35,7 +35,7 @@
     "format:fix": "prettier --write .",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "test:coverage": "jest --coverage --passWithNoTests",
     "test:watch": "jest --watch",
     "build": "ncc build src/index.ts --out dist --source-map --license licenses.txt"
@@ -44,7 +44,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@actions/core": "^1.11.1"
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",

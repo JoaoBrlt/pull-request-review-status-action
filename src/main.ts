@@ -1,17 +1,20 @@
 import * as core from "@actions/core";
-import { wait } from "./wait";
+import * as github from "@actions/github";
 
 export async function run(): Promise<void> {
     try {
-        const ms: string = core.getInput("milliseconds");
+        const token = core.getInput("github-token");
+        const pullRequestNumber = parseInt(core.getInput("pull-request-number"), 10);
 
-        core.debug(`Waiting ${ms} milliseconds ...`);
+        const octokit = github.getOctokit(token);
 
-        core.debug(new Date().toTimeString());
-        await wait(parseInt(ms, 10));
-        core.debug(new Date().toTimeString());
+        const { data: pullRequest } = await octokit.rest.pulls.get({
+            owner: github.context.repo.owner,
+            repo: github.context.repo.repo,
+            pull_number: pullRequestNumber,
+        });
 
-        core.setOutput("time", new Date().toTimeString());
+        console.log(pullRequest);
     } catch (error) {
         if (error instanceof Error) {
             core.setFailed(error.message);

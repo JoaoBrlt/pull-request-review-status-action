@@ -1,5 +1,5 @@
 name: Pull Request Review Status Action
-description: GitHub Action to tag pull requests depending on their code review status.
+description: GitHub Action to label pull requests depending on their code review status.
 author: João Brilhante
 
 branding:
@@ -7,14 +7,12 @@ branding:
   color: blue
 
 inputs:
-  milliseconds:
-    description: The time to wait (in milliseconds)
+  github-token:
+    description: The GitHub token used to authenticate with the GitHub API.
     required: true
-    default: "1000"
-
-outputs:
-  time:
-    description: The date and time after the execution
+  pull-request-number:
+    description: The number of the pull request to label.
+    required: true
 
 runs:
   using: node20
