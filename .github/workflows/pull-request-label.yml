@@ -37,4 +37,4 @@ jobs:
           pending-review-label: Pending review
           changes-requested-label: Changes requested
           approved-label: Approved
-          min-required-approvals: 1
+          required-approvals: 1

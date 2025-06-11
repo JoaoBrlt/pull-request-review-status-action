@@ -25,8 +25,8 @@ inputs:
     description: The label to use when a PR is approved.
     required: false
     default: Approved
-  min-required-approvals:
-    description: The minimum number of approvals to approve a PR.
+  required-approvals:
+    description: The required number of approvals to approve a PR.
     required: false
     default: "1"
 

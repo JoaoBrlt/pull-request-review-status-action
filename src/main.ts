@@ -149,16 +149,16 @@ function getReviewStatus(
     approvedReviews: number,
     changesRequestedReviews: number,
     unresolvedReviewComments: number,
-    minRequiredApprovals: number,
+    requiredApprovals: number,
 ) {
     if (isDraft) {
         return PullRequestReviewStatus.DRAFT;
     }
-    if (approvedReviews >= minRequiredApprovals && changesRequestedReviews === 0 && unresolvedReviewComments === 0) {
-        return PullRequestReviewStatus.APPROVED;
-    }
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {
         return PullRequestReviewStatus.CHANGES_REQUESTED;
+    }
+    if (approvedReviews >= requiredApprovals) {
+        return PullRequestReviewStatus.APPROVED;
     }
     return PullRequestReviewStatus.PENDING_REVIEW;
 }
@@ -289,21 +289,21 @@ async function labelPullRequest(
 
 export async function run(): Promise<void> {
     try {
+        // Parse the inputs
+        const githubToken = core.getInput("github-token");
+        const pullNumber = parseInt(core.getInput("pull-number"), 10);
+        const pendingReviewLabel = core.getInput("pending-review-label");
+        const changesRequestedLabel = core.getInput("changes-requested-label");
+        const approvedLabel = core.getInput("approved-label");
+        const requiredApprovals = parseInt(core.getInput("required-approvals"), 10);
+
         // Get the context
         const context = github.context;
         const owner = context.repo.owner;
         const repo = context.repo.repo;
 
-        // Parse the inputs
-        const token = core.getInput("github-token");
-        const pullNumber = parseInt(core.getInput("pull-number"), 10);
-        const pendingReviewLabel = core.getInput("pending-review-label");
-        const changesRequestedLabel = core.getInput("changes-requested-label");
-        const approvedLabel = core.getInput("approved-label");
-        const minRequiredApprovals = parseInt(core.getInput("min-required-approvals"), 10);
-
         // Initialize the Octokit client
-        const octokit = github.getOctokit(token);
+        const octokit = github.getOctokit(githubToken);
 
         // Get the pull request
         const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
@@ -334,7 +334,7 @@ export async function run(): Promise<void> {
             approvedReviews,
             changesRequestedReviews,
             unresolvedReviewComments,
-            minRequiredApprovals,
+            requiredApprovals,
         );
 
         // Label the pull request according to the review status
