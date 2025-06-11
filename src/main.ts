@@ -497,7 +497,10 @@ async function sendSlackMessage(slackToken: string, slackChannel: string, messag
         });
         core.info("Successfully sent the message!");
     } catch (error) {
-        core.setFailed("Failed to send the message: " + (error instanceof Error ? error.message : ""));
+        if (error instanceof Error) {
+            core.error(error);
+        }
+        core.setFailed("Failed to send the message.");
     }
 }
 
