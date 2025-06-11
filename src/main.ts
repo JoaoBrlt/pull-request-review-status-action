@@ -494,6 +494,8 @@ async function sendSlackMessage(slackToken: string, slackChannel: string, messag
         await slackClient.chat.postMessage({
             channel: slackChannel,
             blocks: message.blocks,
+            unfurl_links: false,
+            unfurl_media: false,
         });
         core.info("Successfully sent the message!");
     } catch (error) {
