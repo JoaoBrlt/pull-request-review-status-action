@@ -7,12 +7,22 @@ branding:
   color: blue
 
 inputs:
+  # Common
   github-token:
     description: The GitHub token used to authenticate with the GitHub API.
     required: true
+  run-mode:
+    description: The run mode (can be "label" or "report").
+    required: true
+  required-approvals:
+    description: The required number of approvals to approve a PR.
+    required: false
+    default: "1"
+
+  # Label
   pull-number:
     description: The number of the pull request to label.
-    required: true
+    required: false
   pending-review-label:
     description: The label to use when a PR is pending review.
     required: false
@@ -25,10 +35,14 @@ inputs:
     description: The label to use when a PR is approved.
     required: false
     default: Approved
-  required-approvals:
-    description: The required number of approvals to approve a PR.
+
+  # Report
+  slack-token:
+    description: The Slack API token used to authenticate with the Slack API.
     required: false
-    default: "1"
+  slack-channel:
+    description: The Slack channel on which to send reports.
+    required: false
 
 runs:
   using: node20

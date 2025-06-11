@@ -1,0 +1,26 @@
+name: Pull Request - Label
+
+on:
+  # When manually triggered
+  workflow_dispatch:
+
+permissions:
+  contents: read # To clone the repository
+
+jobs:
+  label:
+    name: Label
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Run the action
+        uses: ./
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-mode: report
+          required-approvals: 1
+          slack-token: ${{ secrets.SLACK_TOKEN }}
+          slack-channel: "#notifications"

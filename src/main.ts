@@ -2,10 +2,17 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { Repository } from "@octokit/graphql-schema";
 import { components } from "@octokit/openapi-types";
+import { WebClient } from "@slack/web-api";
+import { AnyBlock } from "@slack/types/dist/block-kit/blocks";
+import { RichTextSection } from "@slack/types/dist/block-kit/block-elements";
 
 type OctokitClient = ReturnType<typeof github.getOctokit>;
 
+type PullRequest = components["schemas"]["pull-request"];
+
 type PullRequestReview = components["schemas"]["pull-request-review"];
+
+type SlackMessage = { blocks: AnyBlock[] };
 
 enum PullRequestReviewStatus {
     DRAFT,
@@ -54,8 +61,8 @@ function getLatestReviewPerUser(reviews: PullRequestReview[], author_id: number)
 function groupReviewsByState(latestReviewPerUser: Map<number, PullRequestReview>) {
     const result = new Map<string, PullRequestReview[]>();
     for (const review of latestReviewPerUser.values()) {
-        const previous_reviews = result.get(review.state) ?? [];
-        result.set(review.state, [...previous_reviews, review]);
+        const previousReviews = result.get(review.state) ?? [];
+        result.set(review.state, [...previousReviews, review]);
     }
     return result;
 }
@@ -161,6 +168,43 @@ function getReviewStatus(
         return PullRequestReviewStatus.APPROVED;
     }
     return PullRequestReviewStatus.PENDING_REVIEW;
+}
+
+async function reviewPullRequest(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullRequest: PullRequest,
+    requiredApprovals: number,
+) {
+    // Get pull request reviews
+    const reviews = await getReviews(octokit, owner, repo, pullRequest.number);
+
+    // Get the latest review of each user
+    const latestReviewPerUser = getLatestReviewPerUser(reviews, pullRequest.user.id);
+
+    // Group pull request reviews by state
+    const reviewsByState = groupReviewsByState(latestReviewPerUser);
+    const approvedReviews = (reviewsByState.get("APPROVED") ?? []).length;
+    const changesRequestedReviews = (reviewsByState.get("CHANGES_REQUESTED") ?? []).length;
+
+    // Count unresolved pull request review comments
+    const unresolvedReviewComments = await countUnresolvedReviewComments(
+        octokit,
+        owner,
+        repo,
+        pullRequest.number,
+        pullRequest.user.login,
+    );
+
+    // Determine the review status
+    return getReviewStatus(
+        pullRequest.draft ?? false,
+        approvedReviews,
+        changesRequestedReviews,
+        unresolvedReviewComments,
+        requiredApprovals,
+    );
 }
 
 async function getLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
@@ -287,70 +331,225 @@ async function labelPullRequest(
     }
 }
 
+async function getPullRequests(octokit: OctokitClient, owner: string, repo: string) {
+    return await octokit.paginate(octokit.rest.pulls.list, {
+        owner: owner,
+        repo: repo,
+        state: "open",
+        sort: "created",
+        direction: "asc",
+    });
+}
+
+async function groupPullRequestsByReviewStatus(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullRequests: PullRequest[],
+    requiredApprovals: number,
+) {
+    const result = new Map<PullRequestReviewStatus, PullRequest[]>();
+    for (const pullRequest of pullRequests) {
+        const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
+        const previousPullRequests = result.get(reviewStatus) ?? [];
+        result.set(reviewStatus, [...previousPullRequests, pullRequest]);
+    }
+    return result;
+}
+
+async function runLabelMode() {
+    // Parse the inputs
+    const githubToken = core.getInput("github-token", { required: true });
+    const requiredApprovals = parseInt(core.getInput("required-approvals", { required: true }), 10);
+    const pullNumber = parseInt(core.getInput("pull-number", { required: true }), 10);
+    const pendingReviewLabel = core.getInput("pending-review-label", { required: true });
+    const changesRequestedLabel = core.getInput("changes-requested-label", { required: true });
+    const approvedLabel = core.getInput("approved-label", { required: true });
+
+    // Get the context
+    const context = github.context;
+    const owner = context.repo.owner;
+    const repo = context.repo.repo;
+
+    // Initialize the Octokit client
+    const octokit = github.getOctokit(githubToken);
+
+    // Get the pull request
+    const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
+
+    // Determine the review status of the pull request
+    const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest as PullRequest, requiredApprovals);
+
+    // Label the pull request according to the review status
+    await labelPullRequest(
+        octokit,
+        owner,
+        repo,
+        pullNumber,
+        reviewStatus,
+        pendingReviewLabel,
+        changesRequestedLabel,
+        approvedLabel,
+    );
+}
+
+function buildPullRequestReviewSection(title: string, pullRequests: PullRequest[]): AnyBlock[] {
+    const blocks: AnyBlock[] = [];
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: title,
+        },
+    });
+    blocks.push({
+        type: "rich_text",
+        elements: [
+            {
+                type: "rich_text_list",
+                style: "bullet",
+                indent: 0,
+                elements: buildPullRequestListItems(pullRequests),
+            },
+        ],
+    });
+    return blocks;
+}
+
+function buildPullRequestListItems(pullRequests: PullRequest[]): RichTextSection[] {
+    const listItems: RichTextSection[] = [];
+    if (pullRequests.length > 0) {
+        for (const pullRequest of pullRequests) {
+            listItems.push(buildPullRequestListItem(pullRequest));
+        }
+    } else {
+        listItems.push({
+            type: "rich_text_section",
+            elements: [
+                {
+                    type: "text",
+                    text: "None",
+                },
+            ],
+        });
+    }
+    return listItems;
+}
+
+function buildPullRequestListItem(pullRequest: PullRequest): RichTextSection {
+    return {
+        type: "rich_text_section",
+        elements: [
+            {
+                type: "link",
+                url: pullRequest.html_url,
+                text: pullRequest.title + " (#" + pullRequest.number + ")",
+            },
+            {
+                type: "text",
+                text: " by ",
+            },
+            {
+                type: "link",
+                url: pullRequest.user.html_url,
+                text: "@" + pullRequest.user.login,
+            },
+        ],
+    };
+}
+
+function buildSlackMessage(pullRequestsByReviewStatus: Map<PullRequestReviewStatus, PullRequest[]>): SlackMessage {
+    const blocks: AnyBlock[] = [];
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: ":loudspeaker: *Code Review Recap* :loudspeaker:",
+        },
+    });
+    blocks.push(
+        ...buildPullRequestReviewSection(
+            ":eyes: *Pending*",
+            pullRequestsByReviewStatus.get(PullRequestReviewStatus.PENDING_REVIEW) ?? [],
+        ),
+    );
+    blocks.push(
+        ...buildPullRequestReviewSection(
+            ":pencil2: *Changes requested*",
+            pullRequestsByReviewStatus.get(PullRequestReviewStatus.CHANGES_REQUESTED) ?? [],
+        ),
+    );
+    blocks.push(
+        ...buildPullRequestReviewSection(
+            ":white_check_mark: *Approved*",
+            pullRequestsByReviewStatus.get(PullRequestReviewStatus.CHANGES_REQUESTED) ?? [],
+        ),
+    );
+    return { blocks };
+}
+
+async function sendSlackMessage(slackToken: string, slackChannel: string, message: SlackMessage) {
+    const slackClient = new WebClient(slackToken);
+    try {
+        await slackClient.chat.postMessage({
+            channel: slackChannel,
+            blocks: message.blocks,
+        });
+        core.info("Successfully sent the message!");
+    } catch (error) {
+        core.setFailed("Failed to send the message: " + (error instanceof Error ? error.message : ""));
+    }
+}
+
+async function runReportMode() {
+    // Parse the inputs
+    const githubToken = core.getInput("github-token", { required: true });
+    const requiredApprovals = parseInt(core.getInput("required-approvals", { required: true }), 10);
+    const slackToken = core.getInput("slack-token", { required: true });
+    const slackChannel = core.getInput("slack-channel", { required: true });
+
+    // Get the context
+    const context = github.context;
+    const owner = context.repo.owner;
+    const repo = context.repo.repo;
+
+    // Initialize the Octokit client
+    const octokit = github.getOctokit(githubToken);
+
+    // Get the pull requests
+    const pullRequests = getPullRequests(octokit, owner, repo);
+
+    // Review the pull requests
+    const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
+        octokit,
+        owner,
+        repo,
+        pullRequests as unknown as PullRequest[],
+        requiredApprovals,
+    );
+
+    // Build the message
+    const message = buildSlackMessage(pullRequestsByReviewStatus);
+
+    // Send the message
+    await sendSlackMessage(slackToken, slackChannel, message);
+}
+
 export async function run(): Promise<void> {
     try {
-        // Parse the inputs
-        const githubToken = core.getInput("github-token");
-        const pullNumber = parseInt(core.getInput("pull-number"), 10);
-        const pendingReviewLabel = core.getInput("pending-review-label");
-        const changesRequestedLabel = core.getInput("changes-requested-label");
-        const approvedLabel = core.getInput("approved-label");
-        const requiredApprovals = parseInt(core.getInput("required-approvals"), 10);
-
-        // Get the context
-        const context = github.context;
-        const owner = context.repo.owner;
-        const repo = context.repo.repo;
-
-        // Initialize the Octokit client
-        const octokit = github.getOctokit(githubToken);
-
-        // Get the pull request
-        const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
-
-        // Get pull request reviews
-        const reviews = await getReviews(octokit, owner, repo, pullNumber);
-
-        // Get the latest review of each user
-        const latestReviewPerUser = getLatestReviewPerUser(reviews, pullRequest.user.id);
-
-        // Group pull request reviews by state
-        const reviewsByState = groupReviewsByState(latestReviewPerUser);
-        const approvedReviews = (reviewsByState.get("APPROVED") ?? []).length;
-        const changesRequestedReviews = (reviewsByState.get("CHANGES_REQUESTED") ?? []).length;
-
-        // Count unresolved pull request review comments
-        const unresolvedReviewComments = await countUnresolvedReviewComments(
-            octokit,
-            owner,
-            repo,
-            pullNumber,
-            pullRequest.user.login,
-        );
-
-        // Determine the review status
-        const reviewStatus = getReviewStatus(
-            pullRequest.draft ?? false,
-            approvedReviews,
-            changesRequestedReviews,
-            unresolvedReviewComments,
-            requiredApprovals,
-        );
-
-        // Label the pull request according to the review status
-        await labelPullRequest(
-            octokit,
-            owner,
-            repo,
-            pullNumber,
-            reviewStatus,
-            pendingReviewLabel,
-            changesRequestedLabel,
-            approvedLabel,
-        );
-    } catch (error) {
-        if (error instanceof Error) {
-            core.setFailed(error.message);
+        const runMode = core.getInput("run-mode");
+        switch (runMode) {
+            case "label":
+                await runLabelMode();
+                break;
+            case "report":
+                await runReportMode();
+                break;
+            default:
+                core.setFailed(`Unsupported run mode: ${runMode}`);
+                break;
         }
+    } catch (error) {
+        core.setFailed("Failed to run the action: " + (error instanceof Error ? error.message : ""));
     }
 }

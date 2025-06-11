@@ -18,7 +18,8 @@ on:
     types: ["submitted", "edited", "dismissed"]
 
 permissions:
-  pull-requests: write # To label pull requests
+  contents: read # To clone the repository
+  pull-requests: write # To label the pull requests
 
 jobs:
   label:
@@ -33,6 +34,7 @@ jobs:
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-mode: label
           pull-number: ${{ inputs.pull_request_number || github.event.pull_request.number }}
           pending-review-label: Pending review
           changes-requested-label: Changes requested
