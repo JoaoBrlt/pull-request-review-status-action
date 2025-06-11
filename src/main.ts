@@ -60,7 +60,7 @@ function groupReviewsByState(latestReviewPerUser: Map<number, PullRequestReview>
     return result;
 }
 
-async function getReviewComments(
+function getReviewComments(
     octokit: OctokitClient,
     owner: string,
     repo: string,
@@ -91,7 +91,7 @@ async function getReviewComments(
       }
     }`;
 
-    return await octokit.graphql<{ repository: Repository }>(query, {
+    return octokit.graphql<{ repository: Repository }>(query, {
         owner: owner,
         repo: repo,
         pull_number: pullNumber,
@@ -220,7 +220,7 @@ async function removeLabels(
     }
 }
 
-async function setLabels(
+async function updateLabels(
     octokit: OctokitClient,
     owner: string,
     repo: string,
@@ -245,7 +245,7 @@ async function labelPullRequest(
 ) {
     switch (reviewStatus) {
         case PullRequestReviewStatus.DRAFT:
-            await setLabels(
+            await updateLabels(
                 octokit,
                 owner,
                 repo,
@@ -255,7 +255,7 @@ async function labelPullRequest(
             );
             break;
         case PullRequestReviewStatus.PENDING_REVIEW:
-            await setLabels(
+            await updateLabels(
                 octokit,
                 owner,
                 repo,
@@ -265,7 +265,7 @@ async function labelPullRequest(
             );
             break;
         case PullRequestReviewStatus.CHANGES_REQUESTED:
-            await setLabels(
+            await updateLabels(
                 octokit,
                 owner,
                 repo,
@@ -275,7 +275,7 @@ async function labelPullRequest(
             );
             break;
         case PullRequestReviewStatus.APPROVED:
-            await setLabels(
+            await updateLabels(
                 octokit,
                 owner,
                 repo,
