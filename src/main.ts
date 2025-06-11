@@ -331,8 +331,8 @@ async function labelPullRequest(
     }
 }
 
-async function getPullRequests(octokit: OctokitClient, owner: string, repo: string) {
-    return await octokit.paginate(octokit.rest.pulls.list, {
+function getPullRequests(octokit: OctokitClient, owner: string, repo: string) {
+    return octokit.paginate(octokit.rest.pulls.list, {
         owner: owner,
         repo: repo,
         state: "open",
@@ -517,14 +517,14 @@ async function runReportMode() {
     const octokit = github.getOctokit(githubToken);
 
     // Get the pull requests
-    const pullRequests = getPullRequests(octokit, owner, repo);
+    const pullRequests = await getPullRequests(octokit, owner, repo);
 
     // Review the pull requests
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
         octokit,
         owner,
         repo,
-        pullRequests as unknown as PullRequest[],
+        pullRequests as PullRequest[],
         requiredApprovals,
     );
 
