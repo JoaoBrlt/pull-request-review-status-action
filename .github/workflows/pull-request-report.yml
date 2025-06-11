@@ -1,4 +1,4 @@
-name: Pull Request - Label
+name: Pull Request - Report
 
 on:
   # When manually triggered
@@ -8,8 +8,8 @@ permissions:
   contents: read # To clone the repository
 
 jobs:
-  label:
-    name: Label
+  report:
+    name: Report
     runs-on: ubuntu-latest
 
     steps:
