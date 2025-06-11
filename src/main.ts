@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { Repository } from "@octokit/graphql-schema";
 import { components } from "@octokit/openapi-types";
-import { WebClient } from "@slack/web-api";
+import { ErrorCode, WebClient } from "@slack/web-api";
 import { AnyBlock } from "@slack/types/dist/block-kit/blocks";
 import { RichTextSection } from "@slack/types/dist/block-kit/block-elements";
 
@@ -497,8 +497,12 @@ async function sendSlackMessage(slackToken: string, slackChannel: string, messag
         });
         core.info("Successfully sent the message!");
     } catch (error) {
-        if (error instanceof Error) {
-            core.error(error);
+        // eslint-disable-next-line  @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        if (error.code === ErrorCode.PlatformError) {
+            // eslint-disable-next-line  @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            console.log(error.data);
         }
         core.setFailed("Failed to send the message.");
     }

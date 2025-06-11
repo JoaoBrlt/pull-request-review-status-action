@@ -46782,8 +46782,12 @@ async function sendSlackMessage(slackToken, slackChannel, message) {
         core.info("Successfully sent the message!");
     }
     catch (error) {
-        if (error instanceof Error) {
-            core.error(error);
+        // eslint-disable-next-line  @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        if (error.code === dist.ErrorCode.PlatformError) {
+            // eslint-disable-next-line  @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            console.log(error.data);
         }
         core.setFailed("Failed to send the message.");
     }
