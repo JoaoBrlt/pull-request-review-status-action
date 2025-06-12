@@ -46720,7 +46720,7 @@ async function runReportMode() {
     const octokit = github.getOctokit(githubToken);
     let pullRequests = await getOpenPullRequests(octokit, owner, repo);
     pullRequests = filterDraftPullRequests(pullRequests);
-    const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests);
+    const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests, staleDays);
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, fullPullRequests, requiredApprovals);
     const message = buildSlackMessage(fullPullRequests, pullRequestsByReviewStatus, staleDays);
     await sendSlackMessage(slackToken, slackChannel, message);
@@ -46738,30 +46738,54 @@ async function getOpenPullRequests(octokit, owner, repo) {
 function filterDraftPullRequests(pullRequests) {
     return pullRequests.filter((pullRequest) => !pullRequest.draft);
 }
-async function getFullPullRequests(octokit, owner, repo, pullRequests) {
+async function getFullPullRequests(octokit, owner, repo, pullRequests, staleDays) {
     const result = [];
     for (const pullRequest of pullRequests) {
-        const fullPullRequest = await getFullPullRequest(octokit, owner, repo, pullRequest.number);
+        const fullPullRequest = await getFullPullRequest(octokit, owner, repo, pullRequest.number, staleDays);
         result.push(fullPullRequest);
     }
     return result;
 }
-async function getFullPullRequest(octokit, owner, repo, pullNumber) {
+async function getFullPullRequest(octokit, owner, repo, pullNumber, staleDays) {
     let lastPullRequest;
     for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_MAX_RETRIES; attempt++) {
         const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
         lastPullRequest = pullRequest;
         if (pullRequest.mergeable != null) {
-            return pullRequest;
+            return {
+                ...pullRequest,
+                hasBuildFailure: await hasBuildFailure(octokit, owner, repo, pullRequest),
+                hasMergeConflicts: hasMergeConflicts(pullRequest),
+                isStale: isStale(pullRequest, staleDays),
+            };
         }
         if (attempt < PULL_REQUEST_FETCH_MAX_RETRIES) {
             await sleep(PULL_REQUEST_FETCH_DELAY);
         }
     }
-    return lastPullRequest;
+    return {
+        ...lastPullRequest,
+        hasBuildFailure: false,
+        hasMergeConflicts: false,
+        isStale: false,
+    };
 }
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function hasBuildFailure(octokit, owner, repo, pullRequest) {
+    const combinedStatus = await getPullRequestCombinedStatus(octokit, owner, repo, pullRequest);
+    return combinedStatus.state === "failure";
+}
+function hasMergeConflicts(pullRequest) {
+    return pullRequest.mergeable === false;
+}
+function isStale(pullRequest, staleDays) {
+    const now = new Date();
+    const creationDate = new Date(pullRequest.created_at);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(now.getDate() - staleDays);
+    return creationDate < cutoffDate;
 }
 async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals) {
     const result = new Map();
@@ -46778,13 +46802,13 @@ function buildSlackMessage(pullRequests, pullRequestsByReviewStatus, staleDays) 
     blocks.push(buildMarkdownSectionBlock(":loudspeaker: *Pull Request Summary* :loudspeaker:"));
     blocks.push(buildMarkdownSectionBlock(`*Total open PRs*: ${pullRequests.length}`));
     blocks.push(buildMarkdownSectionBlock(" "));
-    blocks.push(buildPullRequestGroupBlock("eyes", "Pending review", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [], staleDays));
+    blocks.push(buildPullRequestGroupBlock("eyes", "Pending review", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? []));
     blocks.push(buildMarkdownSectionBlock(" "));
-    blocks.push(buildPullRequestGroupBlock("pencil2", "Changes requested", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [], staleDays));
+    blocks.push(buildPullRequestGroupBlock("pencil2", "Changes requested", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
     blocks.push(buildMarkdownSectionBlock(" "));
-    blocks.push(buildPullRequestGroupBlock("white_check_mark", "Approved", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [], staleDays));
+    blocks.push(buildPullRequestGroupBlock("white_check_mark", "Approved", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? []));
     blocks.push(buildMarkdownSectionBlock(" "));
-    blocks.push(buildLegendBlock(staleDays));
+    blocks.push(buildEmojiLegendBlock(staleDays));
     blocks.push(buildMarkdownSectionBlock(" "));
     return { text, blocks };
 }
@@ -46797,13 +46821,10 @@ function buildMarkdownSectionBlock(text) {
         },
     };
 }
-function buildPullRequestGroupBlock(emoji, title, pullRequests, staleDays) {
+function buildPullRequestGroupBlock(emoji, title, pullRequests) {
     return {
         type: "rich_text",
-        elements: [
-            buildPullRequestGroupTitle(emoji, title, pullRequests),
-            buildPullRequestGroupList(pullRequests, staleDays),
-        ],
+        elements: [buildPullRequestGroupTitle(emoji, title, pullRequests), buildPullRequestGroupList(pullRequests)],
     };
 }
 function buildPullRequestGroupTitle(emoji, title, pullRequests) {
@@ -46828,19 +46849,19 @@ function buildPullRequestGroupTitle(emoji, title, pullRequests) {
         ],
     };
 }
-function buildPullRequestGroupList(pullRequests, staleDays) {
+function buildPullRequestGroupList(pullRequests) {
     return {
         type: "rich_text_list",
         style: "bullet",
         indent: 0,
-        elements: buildPullRequestListItems(pullRequests, staleDays),
+        elements: buildPullRequestListItems(pullRequests),
     };
 }
-function buildPullRequestListItems(pullRequests, staleDays) {
+function buildPullRequestListItems(pullRequests) {
     const listItems = [];
     if (pullRequests.length > 0) {
         for (const pullRequest of pullRequests) {
-            listItems.push(buildPullRequestListItem(pullRequest, staleDays));
+            listItems.push(buildPullRequestListItem(pullRequest));
         }
     }
     else {
@@ -46848,9 +46869,7 @@ function buildPullRequestListItems(pullRequests, staleDays) {
     }
     return listItems;
 }
-function buildPullRequestListItem(pullRequest, staleDays) {
-    const isNotMergeable = isPullRequestNotMergeable(pullRequest);
-    const isStale = isPullRequestStale(pullRequest, staleDays);
+function buildPullRequestListItem(pullRequest) {
     return {
         type: "rich_text_section",
         elements: [
@@ -46872,20 +46891,19 @@ function buildPullRequestListItem(pullRequest, staleDays) {
                 type: "text",
                 text: " ",
             },
-            ...(isNotMergeable ? [buildRichTextEmoji("crossed_swords")] : []),
-            ...(isStale ? [buildRichTextEmoji("ice_cube")] : []),
+            ...(pullRequest.hasBuildFailure ? [buildRichTextEmoji("rotating_light")] : []),
+            ...(pullRequest.hasMergeConflicts ? [buildRichTextEmoji("crossed_swords")] : []),
+            ...(pullRequest.isStale ? [buildRichTextEmoji("ice_cube")] : []),
         ],
     };
 }
-function isPullRequestNotMergeable(pullRequest) {
-    return pullRequest.mergeable === false;
-}
-function isPullRequestStale(pullRequest, staleDays) {
-    const now = new Date();
-    const creationDate = new Date(pullRequest.created_at);
-    const cutoffDate = new Date();
-    cutoffDate.setDate(now.getDate() - staleDays);
-    return creationDate < cutoffDate;
+async function getPullRequestCombinedStatus(octokit, owner, repo, pullRequest) {
+    const response = await octokit.rest.repos.getCombinedStatusForRef({
+        owner,
+        repo,
+        ref: pullRequest.head.sha,
+    });
+    return response.data;
 }
 function buildRichTextEmoji(name) {
     return {
@@ -46904,7 +46922,7 @@ function buildPullRequestEmptyListItem() {
         ],
     };
 }
-function buildLegendBlock(staleDays) {
+function buildEmojiLegendBlock(staleDays) {
     return {
         type: "rich_text",
         elements: [
@@ -46917,6 +46935,19 @@ function buildLegendBlock(staleDays) {
                         style: {
                             bold: true,
                         },
+                    },
+                ],
+            },
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "emoji",
+                        name: "rotating_light",
+                    },
+                    {
+                        type: "text",
+                        text: " = Merge conflicts",
                     },
                 ],
             },

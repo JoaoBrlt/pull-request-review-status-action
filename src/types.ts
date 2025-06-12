@@ -29,6 +29,12 @@ export type OctokitClient = InstanceType<typeof GitHub>;
 
 export type PullRequest = components["schemas"]["pull-request"];
 
+export interface FullPullRequest extends PullRequest {
+    hasBuildFailure: boolean;
+    hasMergeConflicts: boolean;
+    isStale: boolean;
+}
+
 export type PullRequestReview = components["schemas"]["pull-request-review"];
 
 export enum PullRequestReviewState {

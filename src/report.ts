@@ -1,4 +1,11 @@
-import { CustomPullRequestReviewStatus, Input, OctokitClient, PullRequest, SlackMessage } from "./types";
+import {
+    CustomPullRequestReviewStatus,
+    FullPullRequest,
+    Input,
+    OctokitClient,
+    PullRequest,
+    SlackMessage,
+} from "./types";
 import { AnyBlock, RichTextSection } from "@slack/types";
 import * as github from "@actions/github";
 import * as core from "@actions/core";
@@ -24,7 +31,7 @@ export async function runReportMode() {
     let pullRequests = await getOpenPullRequests(octokit, owner, repo);
     pullRequests = filterDraftPullRequests(pullRequests);
 
-    const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests);
+    const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests, staleDays);
 
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
         octokit,
@@ -54,16 +61,28 @@ function filterDraftPullRequests(pullRequests: PullRequest[]) {
     return pullRequests.filter((pullRequest) => !pullRequest.draft);
 }
 
-async function getFullPullRequests(octokit: OctokitClient, owner: string, repo: string, pullRequests: PullRequest[]) {
-    const result: PullRequest[] = [];
+async function getFullPullRequests(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullRequests: PullRequest[],
+    staleDays: number,
+): Promise<FullPullRequest[]> {
+    const result: FullPullRequest[] = [];
     for (const pullRequest of pullRequests) {
-        const fullPullRequest = await getFullPullRequest(octokit, owner, repo, pullRequest.number);
+        const fullPullRequest = await getFullPullRequest(octokit, owner, repo, pullRequest.number, staleDays);
         result.push(fullPullRequest);
     }
     return result;
 }
 
-async function getFullPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+async function getFullPullRequest(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    staleDays: number,
+): Promise<FullPullRequest> {
     let lastPullRequest: PullRequest;
 
     for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_MAX_RETRIES; attempt++) {
@@ -71,7 +90,12 @@ async function getFullPullRequest(octokit: OctokitClient, owner: string, repo: s
         lastPullRequest = pullRequest;
 
         if (pullRequest.mergeable != null) {
-            return pullRequest;
+            return {
+                ...pullRequest,
+                hasBuildFailure: await hasBuildFailure(octokit, owner, repo, pullRequest),
+                hasMergeConflicts: hasMergeConflicts(pullRequest),
+                isStale: isStale(pullRequest, staleDays),
+            };
         }
 
         if (attempt < PULL_REQUEST_FETCH_MAX_RETRIES) {
@@ -79,21 +103,43 @@ async function getFullPullRequest(octokit: OctokitClient, owner: string, repo: s
         }
     }
 
-    return lastPullRequest!;
+    return {
+        ...lastPullRequest!,
+        hasBuildFailure: false,
+        hasMergeConflicts: false,
+        isStale: false,
+    };
 }
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function hasBuildFailure(octokit: OctokitClient, owner: string, repo: string, pullRequest: PullRequest) {
+    const combinedStatus = await getPullRequestCombinedStatus(octokit, owner, repo, pullRequest);
+    return combinedStatus.state === "failure";
+}
+
+function hasMergeConflicts(pullRequest: PullRequest) {
+    return pullRequest.mergeable === false;
+}
+
+function isStale(pullRequest: PullRequest, staleDays: number) {
+    const now = new Date();
+    const creationDate = new Date(pullRequest.created_at);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(now.getDate() - staleDays);
+    return creationDate < cutoffDate;
+}
+
 async function groupPullRequestsByReviewStatus(
     octokit: OctokitClient,
     owner: string,
     repo: string,
-    pullRequests: PullRequest[],
+    pullRequests: FullPullRequest[],
     requiredApprovals: number,
 ) {
-    const result = new Map<CustomPullRequestReviewStatus, PullRequest[]>();
+    const result = new Map<CustomPullRequestReviewStatus, FullPullRequest[]>();
     for (const pullRequest of pullRequests) {
         const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
         const previousPullRequests = result.get(reviewStatus) ?? [];
@@ -103,8 +149,8 @@ async function groupPullRequestsByReviewStatus(
 }
 
 function buildSlackMessage(
-    pullRequests: PullRequest[],
-    pullRequestsByReviewStatus: Map<CustomPullRequestReviewStatus, PullRequest[]>,
+    pullRequests: FullPullRequest[],
+    pullRequestsByReviewStatus: Map<CustomPullRequestReviewStatus, FullPullRequest[]>,
     staleDays: number,
 ): SlackMessage {
     const text = "Pull Request Summary";
@@ -118,7 +164,6 @@ function buildSlackMessage(
             "eyes",
             "Pending review",
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [],
-            staleDays,
         ),
     );
     blocks.push(buildMarkdownSectionBlock(" "));
@@ -127,7 +172,6 @@ function buildSlackMessage(
             "pencil2",
             "Changes requested",
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [],
-            staleDays,
         ),
     );
     blocks.push(buildMarkdownSectionBlock(" "));
@@ -136,11 +180,10 @@ function buildSlackMessage(
             "white_check_mark",
             "Approved",
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [],
-            staleDays,
         ),
     );
     blocks.push(buildMarkdownSectionBlock(" "));
-    blocks.push(buildLegendBlock(staleDays));
+    blocks.push(buildEmojiLegendBlock(staleDays));
     blocks.push(buildMarkdownSectionBlock(" "));
 
     return { text, blocks };
@@ -156,22 +199,14 @@ function buildMarkdownSectionBlock(text: string): SectionBlock {
     };
 }
 
-function buildPullRequestGroupBlock(
-    emoji: string,
-    title: string,
-    pullRequests: PullRequest[],
-    staleDays: number,
-): RichTextBlock {
+function buildPullRequestGroupBlock(emoji: string, title: string, pullRequests: FullPullRequest[]): RichTextBlock {
     return {
         type: "rich_text",
-        elements: [
-            buildPullRequestGroupTitle(emoji, title, pullRequests),
-            buildPullRequestGroupList(pullRequests, staleDays),
-        ],
+        elements: [buildPullRequestGroupTitle(emoji, title, pullRequests), buildPullRequestGroupList(pullRequests)],
     };
 }
 
-function buildPullRequestGroupTitle(emoji: string, title: string, pullRequests: PullRequest[]): RichTextSection {
+function buildPullRequestGroupTitle(emoji: string, title: string, pullRequests: FullPullRequest[]): RichTextSection {
     return {
         type: "rich_text_section",
         elements: [
@@ -194,20 +229,20 @@ function buildPullRequestGroupTitle(emoji: string, title: string, pullRequests: 
     };
 }
 
-function buildPullRequestGroupList(pullRequests: PullRequest[], staleDays: number): RichTextList {
+function buildPullRequestGroupList(pullRequests: FullPullRequest[]): RichTextList {
     return {
         type: "rich_text_list",
         style: "bullet",
         indent: 0,
-        elements: buildPullRequestListItems(pullRequests, staleDays),
+        elements: buildPullRequestListItems(pullRequests),
     };
 }
 
-function buildPullRequestListItems(pullRequests: PullRequest[], staleDays: number): RichTextSection[] {
+function buildPullRequestListItems(pullRequests: FullPullRequest[]): RichTextSection[] {
     const listItems: RichTextSection[] = [];
     if (pullRequests.length > 0) {
         for (const pullRequest of pullRequests) {
-            listItems.push(buildPullRequestListItem(pullRequest, staleDays));
+            listItems.push(buildPullRequestListItem(pullRequest));
         }
     } else {
         listItems.push(buildPullRequestEmptyListItem());
@@ -215,9 +250,7 @@ function buildPullRequestListItems(pullRequests: PullRequest[], staleDays: numbe
     return listItems;
 }
 
-function buildPullRequestListItem(pullRequest: PullRequest, staleDays: number): RichTextSection {
-    const isNotMergeable = isPullRequestNotMergeable(pullRequest);
-    const isStale = isPullRequestStale(pullRequest, staleDays);
+function buildPullRequestListItem(pullRequest: FullPullRequest): RichTextSection {
     return {
         type: "rich_text_section",
         elements: [
@@ -239,22 +272,25 @@ function buildPullRequestListItem(pullRequest: PullRequest, staleDays: number): 
                 type: "text",
                 text: " ",
             },
-            ...(isNotMergeable ? [buildRichTextEmoji("crossed_swords")] : []),
-            ...(isStale ? [buildRichTextEmoji("ice_cube")] : []),
+            ...(pullRequest.hasBuildFailure ? [buildRichTextEmoji("rotating_light")] : []),
+            ...(pullRequest.hasMergeConflicts ? [buildRichTextEmoji("crossed_swords")] : []),
+            ...(pullRequest.isStale ? [buildRichTextEmoji("ice_cube")] : []),
         ],
     };
 }
 
-function isPullRequestNotMergeable(pullRequest: PullRequest) {
-    return pullRequest.mergeable === false;
-}
-
-function isPullRequestStale(pullRequest: PullRequest, staleDays: number) {
-    const now = new Date();
-    const creationDate = new Date(pullRequest.created_at);
-    const cutoffDate = new Date();
-    cutoffDate.setDate(now.getDate() - staleDays);
-    return creationDate < cutoffDate;
+async function getPullRequestCombinedStatus(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullRequest: PullRequest,
+) {
+    const response = await octokit.rest.repos.getCombinedStatusForRef({
+        owner,
+        repo,
+        ref: pullRequest.head.sha,
+    });
+    return response.data;
 }
 
 function buildRichTextEmoji(name: string): RichTextEmoji {
@@ -276,7 +312,7 @@ function buildPullRequestEmptyListItem(): RichTextSection {
     };
 }
 
-function buildLegendBlock(staleDays: number) {
+function buildEmojiLegendBlock(staleDays: number) {
     return {
         type: "rich_text",
         elements: [
@@ -289,6 +325,19 @@ function buildLegendBlock(staleDays: number) {
                         style: {
                             bold: true,
                         },
+                    },
+                ],
+            },
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "emoji",
+                        name: "rotating_light",
+                    },
+                    {
+                        type: "text",
+                        text: " = Merge conflicts",
                     },
                 ],
             },
