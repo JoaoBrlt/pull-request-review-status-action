@@ -87,14 +87,14 @@ function buildSlackMessage(
         type: "section",
         text: {
             type: "mrkdwn",
-            text: " ",
+            text: `*Total open PRs*: ${totalOpenPullRequests}`,
         },
     });
     blocks.push({
         type: "section",
         text: {
             type: "mrkdwn",
-            text: `*Total open PRs*: ${totalOpenPullRequests}`,
+            text: " ",
         },
     });
     blocks.push(buildPullRequestReviewSection("eyes", "Pending review", pendingPullRequests));
