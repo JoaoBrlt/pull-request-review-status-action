@@ -98,29 +98,11 @@ function buildSlackMessage(
         },
     });
     blocks.push(buildPullRequestReviewSection("eyes", "Pending review", pendingPullRequests));
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: " ",
-        },
-    });
+
     blocks.push(buildPullRequestReviewSection("pencil2", "Changes requested", changesRequestedPullRequests));
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: " ",
-        },
-    });
+
     blocks.push(buildPullRequestReviewSection("white_check_mark", "Approved", approvedPullRequests));
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: " ",
-        },
-    });
+
     return { text, blocks };
 }
 
