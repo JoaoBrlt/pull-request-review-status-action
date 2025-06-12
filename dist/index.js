@@ -46768,6 +46768,13 @@ function buildSlackMessage(pullRequestsByReviewStatus) {
     blocks.push(...buildPullRequestReviewSection(":eyes: *Pending*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? []));
     blocks.push(...buildPullRequestReviewSection(":pencil2: *Changes requested*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
     blocks.push(...buildPullRequestReviewSection(":white_check_mark: *Approved*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? []));
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
     return { text, blocks };
 }
 function buildPullRequestReviewSection(title, pullRequests) {

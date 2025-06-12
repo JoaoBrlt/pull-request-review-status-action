@@ -94,6 +94,13 @@ function buildSlackMessage(
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [],
         ),
     );
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
     return { text, blocks };
 }
 
