@@ -46774,8 +46774,16 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 async function hasBuildFailure(octokit, owner, repo, pullRequest) {
-    const combinedStatus = await getPullRequestCombinedStatus(octokit, owner, repo, pullRequest);
-    return combinedStatus.state === "failure";
+    const checks = await getPullRequestChecks(octokit, owner, repo, pullRequest);
+    return checks.check_runs.some((check) => check.conclusion === "failure" || check.conclusion === "cancelled" || check.conclusion === "timed_out");
+}
+async function getPullRequestChecks(octokit, owner, repo, pullRequest) {
+    const response = await octokit.rest.checks.listForRef({
+        owner,
+        repo,
+        ref: pullRequest.head.sha,
+    });
+    return response.data;
 }
 function hasMergeConflicts(pullRequest) {
     return pullRequest.mergeable === false;
@@ -46896,14 +46904,6 @@ function buildPullRequestListItem(pullRequest) {
             ...(pullRequest.isStale ? [buildRichTextEmoji("ice_cube")] : []),
         ],
     };
-}
-async function getPullRequestCombinedStatus(octokit, owner, repo, pullRequest) {
-    const response = await octokit.rest.repos.getCombinedStatusForRef({
-        owner,
-        repo,
-        ref: pullRequest.head.sha,
-    });
-    return response.data;
 }
 function buildRichTextEmoji(name) {
     return {
