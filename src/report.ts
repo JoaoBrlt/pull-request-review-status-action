@@ -337,7 +337,7 @@ function buildEmojiLegendBlock(staleDays: number) {
                     },
                     {
                         type: "text",
-                        text: " = Merge conflicts",
+                        text: " = Build failure",
                     },
                 ],
             },
