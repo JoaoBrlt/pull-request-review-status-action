@@ -21,6 +21,9 @@ export async function runReportMode() {
     pullRequests = filterDraftPullRequests(pullRequests);
     console.log("PULL REQUESTS:", pullRequests);
 
+    const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests);
+    console.log("FULL PULL REQUESTS:", fullPullRequests);
+
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
         octokit,
         owner,
@@ -43,6 +46,20 @@ async function getOpenPullRequests(octokit: OctokitClient, owner: string, repo: 
         direction: "asc",
     });
     return response as PullRequest[];
+}
+
+async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data as PullRequest;
+}
+
+async function getFullPullRequests(octokit: OctokitClient, owner: string, repo: string, pullRequests: PullRequest[]) {
+    const result: PullRequest[] = [];
+    for (const pullRequest of pullRequests) {
+        const fullPullRequest = await getPullRequest(octokit, owner, repo, pullRequest.number);
+        result.push(fullPullRequest);
+    }
+    return result;
 }
 
 function filterDraftPullRequests(pullRequests: PullRequest[]) {

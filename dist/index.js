@@ -46717,6 +46717,8 @@ async function runReportMode() {
     let pullRequests = await getOpenPullRequests(octokit, owner, repo);
     pullRequests = filterDraftPullRequests(pullRequests);
     console.log("PULL REQUESTS:", pullRequests);
+    const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests);
+    console.log("FULL PULL REQUESTS:", fullPullRequests);
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
     const message = buildSlackMessage(pullRequests, pullRequestsByReviewStatus);
     await sendSlackMessage(slackToken, slackChannel, message);
@@ -46730,6 +46732,18 @@ async function getOpenPullRequests(octokit, owner, repo) {
         direction: "asc",
     });
     return response;
+}
+async function report_getPullRequest(octokit, owner, repo, pullNumber) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data;
+}
+async function getFullPullRequests(octokit, owner, repo, pullRequests) {
+    const result = [];
+    for (const pullRequest of pullRequests) {
+        const fullPullRequest = await report_getPullRequest(octokit, owner, repo, pullRequest.number);
+        result.push(fullPullRequest);
+    }
+    return result;
 }
 function filterDraftPullRequests(pullRequests) {
     return pullRequests.filter((pullRequest) => !pullRequest.draft);
