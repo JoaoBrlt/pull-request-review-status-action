@@ -17,6 +17,7 @@ export enum Input {
     // Report
     SLACK_TOKEN = "slack-token",
     SLACK_CHANNEL = "slack-channel",
+    STALE_DAYS = "stale-days",
 }
 
 export enum RunMode {

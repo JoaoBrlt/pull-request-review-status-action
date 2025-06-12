@@ -24,3 +24,4 @@ jobs:
           required-approvals: 1
           slack-token: ${{ secrets.SLACK_TOKEN }}
           slack-channel: "#notifications"
+          stale-days: 1

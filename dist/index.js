@@ -46471,6 +46471,7 @@ var Input;
     // Report
     Input["SLACK_TOKEN"] = "slack-token";
     Input["SLACK_CHANNEL"] = "slack-channel";
+    Input["STALE_DAYS"] = "stale-days";
 })(Input || (Input = {}));
 var RunMode;
 (function (RunMode) {
@@ -46493,8 +46494,12 @@ var CustomPullRequestReviewStatus;
 
 // EXTERNAL MODULE: ./node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(3228);
-;// CONCATENATED MODULE: ./src/review.ts
+;// CONCATENATED MODULE: ./src/shared.ts
 
+async function getPullRequest(octokit, owner, repo, pullNumber) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data;
+}
 async function reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals) {
     if (pullRequest.draft) {
         return CustomPullRequestReviewStatus.DRAFT;
@@ -46634,10 +46639,6 @@ async function runLabelMode() {
     const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
     await labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel);
 }
-async function getPullRequest(octokit, owner, repo, pullNumber) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data;
-}
 async function getLabels(octokit, owner, repo, pullNumber) {
     const labels = await octokit.paginate(octokit.rest.issues.listLabelsOnIssue, {
         owner: owner,
@@ -46706,7 +46707,7 @@ var dist = __nccwpck_require__(5105);
 
 
 
-const PULL_REQUEST_FETCH_LIMIT = 10;
+const PULL_REQUEST_FETCH_MAX_RETRIES = 10;
 const PULL_REQUEST_FETCH_DELAY = 500; // ms
 async function runReportMode() {
     const owner = github.context.repo.owner;
@@ -46715,14 +46716,13 @@ async function runReportMode() {
     const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
     const slackToken = core.getInput(Input.SLACK_TOKEN, { required: true });
     const slackChannel = core.getInput(Input.SLACK_CHANNEL, { required: true });
+    const staleDays = parseInt(core.getInput(Input.STALE_DAYS, { required: true }), 10);
     const octokit = github.getOctokit(githubToken);
     let pullRequests = await getOpenPullRequests(octokit, owner, repo);
     pullRequests = filterDraftPullRequests(pullRequests);
-    console.log("PULL REQUESTS:", pullRequests);
     const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests);
-    console.log("FULL PULL REQUESTS:", fullPullRequests);
-    const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
-    const message = buildSlackMessage(pullRequests, pullRequestsByReviewStatus);
+    const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, fullPullRequests, requiredApprovals);
+    const message = buildSlackMessage(fullPullRequests, pullRequestsByReviewStatus, staleDays);
     await sendSlackMessage(slackToken, slackChannel, message);
 }
 async function getOpenPullRequests(octokit, owner, repo) {
@@ -46748,22 +46748,17 @@ async function getFullPullRequests(octokit, owner, repo, pullRequests) {
 }
 async function getFullPullRequest(octokit, owner, repo, pullNumber) {
     let lastPullRequest;
-    for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_LIMIT; attempt++) {
-        console.log(`ATTEMPT: ${attempt}`);
-        const pullRequest = await report_getPullRequest(octokit, owner, repo, pullNumber);
+    for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_MAX_RETRIES; attempt++) {
+        const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
         lastPullRequest = pullRequest;
         if (pullRequest.mergeable != null) {
             return pullRequest;
         }
-        if (attempt < PULL_REQUEST_FETCH_LIMIT) {
+        if (attempt < PULL_REQUEST_FETCH_MAX_RETRIES) {
             await sleep(PULL_REQUEST_FETCH_DELAY);
         }
     }
     return lastPullRequest;
-}
-async function report_getPullRequest(octokit, owner, repo, pullNumber) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data;
 }
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -46777,7 +46772,7 @@ async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequest
     }
     return result;
 }
-function buildSlackMessage(pullRequests, pullRequestsByReviewStatus) {
+function buildSlackMessage(pullRequests, pullRequestsByReviewStatus, staleDays) {
     const text = "Pull Request Summary";
     const blocks = [];
     const spacer = buildSpacerSectionBlock();
@@ -46796,11 +46791,11 @@ function buildSlackMessage(pullRequests, pullRequestsByReviewStatus) {
         },
     });
     blocks.push(spacer);
-    blocks.push(buildPullRequestGroupBlock("eyes", "Pending review", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? []));
+    blocks.push(buildPullRequestGroupBlock("eyes", "Pending review", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [], staleDays));
     blocks.push(spacer);
-    blocks.push(buildPullRequestGroupBlock("pencil2", "Changes requested", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
+    blocks.push(buildPullRequestGroupBlock("pencil2", "Changes requested", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [], staleDays));
     blocks.push(spacer);
-    blocks.push(buildPullRequestGroupBlock("white_check_mark", "Approved", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? []));
+    blocks.push(buildPullRequestGroupBlock("white_check_mark", "Approved", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [], staleDays));
     blocks.push(spacer);
     return { text, blocks };
 }
@@ -46813,10 +46808,13 @@ function buildSpacerSectionBlock() {
         },
     };
 }
-function buildPullRequestGroupBlock(emoji, title, pullRequests) {
+function buildPullRequestGroupBlock(emoji, title, pullRequests, staleDays) {
     return {
         type: "rich_text",
-        elements: [buildPullRequestGroupTitle(emoji, title, pullRequests), buildPullRequestGroupList(pullRequests)],
+        elements: [
+            buildPullRequestGroupTitle(emoji, title, pullRequests),
+            buildPullRequestGroupList(pullRequests, staleDays),
+        ],
     };
 }
 function buildPullRequestGroupTitle(emoji, title, pullRequests) {
@@ -46841,19 +46839,19 @@ function buildPullRequestGroupTitle(emoji, title, pullRequests) {
         ],
     };
 }
-function buildPullRequestGroupList(pullRequests) {
+function buildPullRequestGroupList(pullRequests, staleDays) {
     return {
         type: "rich_text_list",
         style: "bullet",
         indent: 0,
-        elements: buildPullRequestListItems(pullRequests),
+        elements: buildPullRequestListItems(pullRequests, staleDays),
     };
 }
-function buildPullRequestListItems(pullRequests) {
+function buildPullRequestListItems(pullRequests, staleDays) {
     const listItems = [];
     if (pullRequests.length > 0) {
         for (const pullRequest of pullRequests) {
-            listItems.push(buildPullRequestListItem(pullRequest));
+            listItems.push(buildPullRequestListItem(pullRequest, staleDays));
         }
     }
     else {
@@ -46861,7 +46859,9 @@ function buildPullRequestListItems(pullRequests) {
     }
     return listItems;
 }
-function buildPullRequestListItem(pullRequest) {
+function buildPullRequestListItem(pullRequest, staleDays) {
+    const isNotMergeable = isPullRequestNotMergeable(pullRequest);
+    const isStale = isPullRequestStale(pullRequest, staleDays);
     return {
         type: "rich_text_section",
         elements: [
@@ -46879,7 +46879,29 @@ function buildPullRequestListItem(pullRequest) {
                 url: pullRequest.user.html_url,
                 text: `@${pullRequest.user.login}`,
             },
+            {
+                type: "text",
+                text: " ",
+            },
+            ...(isNotMergeable ? [buildRichTextEmoji("crossed_swords")] : []),
+            ...(isStale ? [buildRichTextEmoji("ice_cube")] : []),
         ],
+    };
+}
+function isPullRequestNotMergeable(pullRequest) {
+    return pullRequest.mergeable === false;
+}
+function isPullRequestStale(pullRequest, staleDays) {
+    const now = new Date();
+    const creationDate = new Date(pullRequest.created_at);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(now.getDate() - staleDays);
+    return creationDate < cutoffDate;
+}
+function buildRichTextEmoji(name) {
+    return {
+        type: "emoji",
+        name,
     };
 }
 function buildPullRequestEmptyListItem() {

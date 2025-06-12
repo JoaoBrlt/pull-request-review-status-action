@@ -1,7 +1,7 @@
-import { CustomPullRequestReviewStatus, Input, OctokitClient, PullRequest } from "./types";
+import { CustomPullRequestReviewStatus, Input, OctokitClient } from "./types";
 import * as github from "@actions/github";
 import * as core from "@actions/core";
-import { reviewPullRequest } from "./review";
+import { getPullRequest, reviewPullRequest } from "./shared";
 
 export async function runLabelMode() {
     const owner = github.context.repo.owner;
@@ -30,11 +30,6 @@ export async function runLabelMode() {
         changesRequestedLabel,
         approvedLabel,
     );
-}
-
-async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data as PullRequest;
 }
 
 async function getLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {

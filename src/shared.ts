@@ -7,6 +7,11 @@ import {
 } from "./types";
 import { Repository } from "@octokit/graphql-schema";
 
+export async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data as PullRequest;
+}
+
 export async function reviewPullRequest(
     octokit: OctokitClient,
     owner: string,

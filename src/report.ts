@@ -2,11 +2,11 @@ import { CustomPullRequestReviewStatus, Input, OctokitClient, PullRequest, Slack
 import { AnyBlock, RichTextSection } from "@slack/types";
 import * as github from "@actions/github";
 import * as core from "@actions/core";
-import { RichTextBlock, RichTextList, WebClient } from "@slack/web-api";
-import { reviewPullRequest } from "./review";
+import { RichTextBlock, RichTextEmoji, RichTextList, WebClient } from "@slack/web-api";
+import { getPullRequest, reviewPullRequest } from "./shared";
 import { SectionBlock } from "@slack/types/dist/block-kit/blocks";
 
-const PULL_REQUEST_FETCH_LIMIT = 10;
+const PULL_REQUEST_FETCH_MAX_RETRIES = 10;
 const PULL_REQUEST_FETCH_DELAY = 500; // ms
 
 export async function runReportMode() {
@@ -17,25 +17,24 @@ export async function runReportMode() {
     const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
     const slackToken = core.getInput(Input.SLACK_TOKEN, { required: true });
     const slackChannel = core.getInput(Input.SLACK_CHANNEL, { required: true });
+    const staleDays = parseInt(core.getInput(Input.STALE_DAYS, { required: true }), 10);
 
     const octokit = github.getOctokit(githubToken);
 
     let pullRequests = await getOpenPullRequests(octokit, owner, repo);
     pullRequests = filterDraftPullRequests(pullRequests);
-    console.log("PULL REQUESTS:", pullRequests);
 
     const fullPullRequests = await getFullPullRequests(octokit, owner, repo, pullRequests);
-    console.log("FULL PULL REQUESTS:", fullPullRequests);
 
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
         octokit,
         owner,
         repo,
-        pullRequests,
+        fullPullRequests,
         requiredApprovals,
     );
 
-    const message = buildSlackMessage(pullRequests, pullRequestsByReviewStatus);
+    const message = buildSlackMessage(fullPullRequests, pullRequestsByReviewStatus, staleDays);
 
     await sendSlackMessage(slackToken, slackChannel, message);
 }
@@ -67,8 +66,7 @@ async function getFullPullRequests(octokit: OctokitClient, owner: string, repo: 
 async function getFullPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
     let lastPullRequest: PullRequest;
 
-    for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_LIMIT; attempt++) {
-        console.log(`ATTEMPT: ${attempt}`);
+    for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_MAX_RETRIES; attempt++) {
         const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
         lastPullRequest = pullRequest;
 
@@ -76,17 +74,12 @@ async function getFullPullRequest(octokit: OctokitClient, owner: string, repo: s
             return pullRequest;
         }
 
-        if (attempt < PULL_REQUEST_FETCH_LIMIT) {
+        if (attempt < PULL_REQUEST_FETCH_MAX_RETRIES) {
             await sleep(PULL_REQUEST_FETCH_DELAY);
         }
     }
 
     return lastPullRequest!;
-}
-
-async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data as PullRequest;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -112,6 +105,7 @@ async function groupPullRequestsByReviewStatus(
 function buildSlackMessage(
     pullRequests: PullRequest[],
     pullRequestsByReviewStatus: Map<CustomPullRequestReviewStatus, PullRequest[]>,
+    staleDays: number,
 ): SlackMessage {
     const text = "Pull Request Summary";
     const blocks: AnyBlock[] = [];
@@ -138,6 +132,7 @@ function buildSlackMessage(
             "eyes",
             "Pending review",
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [],
+            staleDays,
         ),
     );
     blocks.push(spacer);
@@ -146,6 +141,7 @@ function buildSlackMessage(
             "pencil2",
             "Changes requested",
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [],
+            staleDays,
         ),
     );
     blocks.push(spacer);
@@ -154,6 +150,7 @@ function buildSlackMessage(
             "white_check_mark",
             "Approved",
             pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [],
+            staleDays,
         ),
     );
     blocks.push(spacer);
@@ -171,10 +168,18 @@ function buildSpacerSectionBlock(): SectionBlock {
     };
 }
 
-function buildPullRequestGroupBlock(emoji: string, title: string, pullRequests: PullRequest[]): RichTextBlock {
+function buildPullRequestGroupBlock(
+    emoji: string,
+    title: string,
+    pullRequests: PullRequest[],
+    staleDays: number,
+): RichTextBlock {
     return {
         type: "rich_text",
-        elements: [buildPullRequestGroupTitle(emoji, title, pullRequests), buildPullRequestGroupList(pullRequests)],
+        elements: [
+            buildPullRequestGroupTitle(emoji, title, pullRequests),
+            buildPullRequestGroupList(pullRequests, staleDays),
+        ],
     };
 }
 
@@ -201,20 +206,20 @@ function buildPullRequestGroupTitle(emoji: string, title: string, pullRequests: 
     };
 }
 
-function buildPullRequestGroupList(pullRequests: PullRequest[]): RichTextList {
+function buildPullRequestGroupList(pullRequests: PullRequest[], staleDays: number): RichTextList {
     return {
         type: "rich_text_list",
         style: "bullet",
         indent: 0,
-        elements: buildPullRequestListItems(pullRequests),
+        elements: buildPullRequestListItems(pullRequests, staleDays),
     };
 }
 
-function buildPullRequestListItems(pullRequests: PullRequest[]): RichTextSection[] {
+function buildPullRequestListItems(pullRequests: PullRequest[], staleDays: number): RichTextSection[] {
     const listItems: RichTextSection[] = [];
     if (pullRequests.length > 0) {
         for (const pullRequest of pullRequests) {
-            listItems.push(buildPullRequestListItem(pullRequest));
+            listItems.push(buildPullRequestListItem(pullRequest, staleDays));
         }
     } else {
         listItems.push(buildPullRequestEmptyListItem());
@@ -222,7 +227,9 @@ function buildPullRequestListItems(pullRequests: PullRequest[]): RichTextSection
     return listItems;
 }
 
-function buildPullRequestListItem(pullRequest: PullRequest): RichTextSection {
+function buildPullRequestListItem(pullRequest: PullRequest, staleDays: number): RichTextSection {
+    const isNotMergeable = isPullRequestNotMergeable(pullRequest);
+    const isStale = isPullRequestStale(pullRequest, staleDays);
     return {
         type: "rich_text_section",
         elements: [
@@ -240,7 +247,32 @@ function buildPullRequestListItem(pullRequest: PullRequest): RichTextSection {
                 url: pullRequest.user.html_url,
                 text: `@${pullRequest.user.login}`,
             },
+            {
+                type: "text",
+                text: " ",
+            },
+            ...(isNotMergeable ? [buildRichTextEmoji("crossed_swords")] : []),
+            ...(isStale ? [buildRichTextEmoji("ice_cube")] : []),
         ],
+    };
+}
+
+function isPullRequestNotMergeable(pullRequest: PullRequest) {
+    return pullRequest.mergeable === false;
+}
+
+function isPullRequestStale(pullRequest: PullRequest, staleDays: number) {
+    const now = new Date();
+    const creationDate = new Date(pullRequest.created_at);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(now.getDate() - staleDays);
+    return creationDate < cutoffDate;
+}
+
+function buildRichTextEmoji(name: string): RichTextEmoji {
+    return {
+        type: "emoji",
+        name,
     };
 }
 

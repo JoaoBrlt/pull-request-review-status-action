@@ -43,6 +43,10 @@ inputs:
   slack-channel:
     description: The Slack channel on which to send reports.
     required: false
+  stale-days:
+    description: The number of days after which a pull request should be considered stale.
+    required: false
+    default: "7"
 
 runs:
   using: node20
