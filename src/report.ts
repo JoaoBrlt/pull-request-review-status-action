@@ -110,23 +110,9 @@ function buildSlackMessage(
     const text = "Pull Request Summary";
     const blocks: AnyBlock[] = [];
 
-    const spacer = buildSpacerSectionBlock();
-
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: ":loudspeaker: *Pull Request Summary* :loudspeaker:",
-        },
-    });
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: `*Total open PRs*: ${pullRequests.length}`,
-        },
-    });
-    blocks.push(spacer);
+    blocks.push(buildMarkdownSectionBlock(":loudspeaker: *Pull Request Summary* :loudspeaker:"));
+    blocks.push(buildMarkdownSectionBlock(`*Total open PRs*: ${pullRequests.length}`));
+    blocks.push(buildMarkdownSectionBlock(" "));
     blocks.push(
         buildPullRequestGroupBlock(
             "eyes",
@@ -135,7 +121,7 @@ function buildSlackMessage(
             staleDays,
         ),
     );
-    blocks.push(spacer);
+    blocks.push(buildMarkdownSectionBlock(" "));
     blocks.push(
         buildPullRequestGroupBlock(
             "pencil2",
@@ -144,7 +130,7 @@ function buildSlackMessage(
             staleDays,
         ),
     );
-    blocks.push(spacer);
+    blocks.push(buildMarkdownSectionBlock(" "));
     blocks.push(
         buildPullRequestGroupBlock(
             "white_check_mark",
@@ -153,17 +139,19 @@ function buildSlackMessage(
             staleDays,
         ),
     );
-    blocks.push(spacer);
+    blocks.push(buildMarkdownSectionBlock(" "));
+    blocks.push(buildLegendBlock(staleDays));
+    blocks.push(buildMarkdownSectionBlock(" "));
 
     return { text, blocks };
 }
 
-function buildSpacerSectionBlock(): SectionBlock {
+function buildMarkdownSectionBlock(text: string): SectionBlock {
     return {
         type: "section",
         text: {
             type: "mrkdwn",
-            text: " ",
+            text,
         },
     };
 }
@@ -283,6 +271,52 @@ function buildPullRequestEmptyListItem(): RichTextSection {
             {
                 type: "text",
                 text: "None",
+            },
+        ],
+    };
+}
+
+function buildLegendBlock(staleDays: number) {
+    return {
+        type: "rich_text",
+        elements: [
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "text",
+                        text: "Legend:",
+                        style: {
+                            bold: true,
+                        },
+                    },
+                ],
+            },
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "emoji",
+                        name: "crossed_swords",
+                    },
+                    {
+                        type: "text",
+                        text: " = Merge conflicts",
+                    },
+                ],
+            },
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "emoji",
+                        name: "ice_cube",
+                    },
+                    {
+                        type: "text",
+                        text: ` = Stale PR (> ${staleDays} days)`,
+                    },
+                ],
             },
         ],
     };
