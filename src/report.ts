@@ -2,50 +2,51 @@ import { CustomPullRequestReviewStatus, Input, OctokitClient, PullRequest, Slack
 import { AnyBlock, RichTextSection } from "@slack/types";
 import * as github from "@actions/github";
 import * as core from "@actions/core";
-import { RichTextBlock, WebClient } from "@slack/web-api";
+import { RichTextBlock, RichTextList, WebClient } from "@slack/web-api";
 import { reviewPullRequest } from "./review";
+import { SectionBlock } from "@slack/types/dist/block-kit/blocks";
 
 export async function runReportMode() {
-    // Get the context
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
 
-    // Parse the inputs
     const githubToken = core.getInput(Input.GITHUB_TOKEN, { required: true });
     const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
     const slackToken = core.getInput(Input.SLACK_TOKEN, { required: true });
     const slackChannel = core.getInput(Input.SLACK_CHANNEL, { required: true });
 
-    // Initialize the Octokit client
     const octokit = github.getOctokit(githubToken);
 
-    // Get the open pull requests
-    const pullRequests = await getOpenPullRequests(octokit, owner, repo);
+    let pullRequests = await getOpenPullRequests(octokit, owner, repo);
 
-    // Get the review status of the pull requests
+    pullRequests = filterDraftPullRequests(pullRequests);
+
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
         octokit,
         owner,
         repo,
-        pullRequests as PullRequest[],
+        pullRequests,
         requiredApprovals,
     );
 
-    // Build the message
-    const message = buildSlackMessage(pullRequestsByReviewStatus);
+    const message = buildSlackMessage(pullRequests, pullRequestsByReviewStatus);
 
-    // Send the message
     await sendSlackMessage(slackToken, slackChannel, message);
 }
 
-function getOpenPullRequests(octokit: OctokitClient, owner: string, repo: string) {
-    return octokit.paginate(octokit.rest.pulls.list, {
+async function getOpenPullRequests(octokit: OctokitClient, owner: string, repo: string) {
+    const response = await octokit.paginate(octokit.rest.pulls.list, {
         owner: owner,
         repo: repo,
         state: "open",
         sort: "created",
         direction: "asc",
     });
+    return response as PullRequest[];
+}
+
+function filterDraftPullRequests(pullRequests: PullRequest[]) {
+    return pullRequests.filter((pullRequest) => !pullRequest.draft);
 }
 
 async function groupPullRequestsByReviewStatus(
@@ -65,17 +66,14 @@ async function groupPullRequestsByReviewStatus(
 }
 
 function buildSlackMessage(
+    pullRequests: PullRequest[],
     pullRequestsByReviewStatus: Map<CustomPullRequestReviewStatus, PullRequest[]>,
 ): SlackMessage {
-    const pendingPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [];
-    const changesRequestedPullRequests =
-        pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [];
-    const approvedPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [];
-    const totalOpenPullRequests =
-        pendingPullRequests.length + changesRequestedPullRequests.length + approvedPullRequests.length;
-
     const text = "Pull Request Summary";
     const blocks: AnyBlock[] = [];
+
+    const spacer = buildSpacerSectionBlock();
+
     blocks.push({
         type: "section",
         text: {
@@ -87,56 +85,84 @@ function buildSlackMessage(
         type: "section",
         text: {
             type: "mrkdwn",
-            text: `*Total open PRs*: ${totalOpenPullRequests}`,
+            text: `*Total open PRs*: ${pullRequests.length}`,
         },
     });
-    blocks.push({
+    blocks.push(spacer);
+    blocks.push(
+        buildPullRequestGroupBlock(
+            "eyes",
+            "Pending review",
+            pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [],
+        ),
+    );
+    blocks.push(spacer);
+    blocks.push(
+        buildPullRequestGroupBlock(
+            "pencil2",
+            "Changes requested",
+            pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [],
+        ),
+    );
+    blocks.push(spacer);
+    blocks.push(
+        buildPullRequestGroupBlock(
+            "white_check_mark",
+            "Approved",
+            pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [],
+        ),
+    );
+    blocks.push(spacer);
+
+    return { text, blocks };
+}
+
+function buildSpacerSectionBlock(): SectionBlock {
+    return {
         type: "section",
         text: {
             type: "mrkdwn",
             text: " ",
         },
-    });
-    blocks.push(buildPullRequestReviewSection("eyes", "Pending review", pendingPullRequests));
-
-    blocks.push(buildPullRequestReviewSection("pencil2", "Changes requested", changesRequestedPullRequests));
-
-    blocks.push(buildPullRequestReviewSection("white_check_mark", "Approved", approvedPullRequests));
-
-    return { text, blocks };
+    };
 }
 
-function buildPullRequestReviewSection(emoji: string, title: string, pullRequests: PullRequest[]): RichTextBlock {
+function buildPullRequestGroupBlock(emoji: string, title: string, pullRequests: PullRequest[]): RichTextBlock {
     return {
         type: "rich_text",
+        elements: [buildPullRequestGroupTitle(emoji, title, pullRequests), buildPullRequestGroupList(pullRequests)],
+    };
+}
+
+function buildPullRequestGroupTitle(emoji: string, title: string, pullRequests: PullRequest[]): RichTextSection {
+    return {
+        type: "rich_text_section",
         elements: [
             {
-                type: "rich_text_section",
-                elements: [
-                    {
-                        type: "emoji",
-                        name: emoji,
-                    },
-                    {
-                        type: "text",
-                        text: " ",
-                    },
-                    {
-                        type: "text",
-                        text: `${title} (${pullRequests.length})`,
-                        style: {
-                            bold: true,
-                        },
-                    },
-                ],
+                type: "emoji",
+                name: emoji,
             },
             {
-                type: "rich_text_list",
-                style: "bullet",
-                indent: 0,
-                elements: buildPullRequestListItems(pullRequests),
+                type: "text",
+                text: " ",
+            },
+            {
+                type: "text",
+                text: `${title} (${pullRequests.length})`,
+                style: {
+                    bold: true,
+                },
             },
         ],
+    };
+}
+
+function buildPullRequestGroupList(pullRequests: PullRequest[]): RichTextList {
+    return {
+        type: "rich_text_list",
+        style: "bullet",
+        indent: 0,
+        elements: buildPullRequestListItems(pullRequests),
     };
 }
 
@@ -147,15 +173,7 @@ function buildPullRequestListItems(pullRequests: PullRequest[]): RichTextSection
             listItems.push(buildPullRequestListItem(pullRequest));
         }
     } else {
-        listItems.push({
-            type: "rich_text_section",
-            elements: [
-                {
-                    type: "text",
-                    text: "None",
-                },
-            ],
-        });
+        listItems.push(buildPullRequestEmptyListItem());
     }
     return listItems;
 }
@@ -177,6 +195,18 @@ function buildPullRequestListItem(pullRequest: PullRequest): RichTextSection {
                 type: "link",
                 url: pullRequest.user.html_url,
                 text: `@${pullRequest.user.login}`,
+            },
+        ],
+    };
+}
+
+function buildPullRequestEmptyListItem(): RichTextSection {
+    return {
+        type: "rich_text_section",
+        elements: [
+            {
+                type: "text",
+                text: "None",
             },
         ],
     };

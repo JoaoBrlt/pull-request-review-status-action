@@ -4,11 +4,9 @@ import * as core from "@actions/core";
 import { reviewPullRequest } from "./review";
 
 export async function runLabelMode() {
-    // Get the context
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
 
-    // Parse the inputs
     const githubToken = core.getInput(Input.GITHUB_TOKEN, { required: true });
     const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
     const pullNumber = parseInt(core.getInput(Input.PULL_NUMBER, { required: true }), 10);
@@ -16,16 +14,12 @@ export async function runLabelMode() {
     const changesRequestedLabel = core.getInput(Input.CHANGES_REQUESTED_LABEL, { required: true });
     const approvedLabel = core.getInput(Input.APPROVED_LABEL, { required: true });
 
-    // Initialize the Octokit client
     const octokit = github.getOctokit(githubToken);
 
-    // Get the pull request
     const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
 
-    // Get the review status of the pull request
-    const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest as PullRequest, requiredApprovals);
+    const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
 
-    // Label the pull request according to the review status
     await labelPullRequest(
         octokit,
         owner,
@@ -40,7 +34,7 @@ export async function runLabelMode() {
 
 async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
     const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data;
+    return response.data as PullRequest;
 }
 
 async function getLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {

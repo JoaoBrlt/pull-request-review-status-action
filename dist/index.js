@@ -46496,18 +46496,16 @@ var github = __nccwpck_require__(3228);
 ;// CONCATENATED MODULE: ./src/review.ts
 
 async function reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals) {
-    // Get pull request reviews
+    if (pullRequest.draft) {
+        return CustomPullRequestReviewStatus.DRAFT;
+    }
     const reviews = await getReviews(octokit, owner, repo, pullRequest.number);
-    // Get the latest review of each user
     const latestReviewPerUser = getLatestReviewPerUser(reviews, pullRequest.user.id);
-    // Group pull request reviews by state
     const reviewsByState = groupReviewsByState(latestReviewPerUser);
     const approvedReviews = (reviewsByState.get(PullRequestReviewState.APPROVED) ?? []).length;
     const changesRequestedReviews = (reviewsByState.get(PullRequestReviewState.CHANGES_REQUESTED) ?? []).length;
-    // Count unresolved pull request review comments
     const unresolvedReviewComments = await countUnresolvedReviewComments(octokit, owner, repo, pullRequest.number, pullRequest.user.login);
-    // Determine the review status of the pull request
-    return getReviewStatus(pullRequest, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
+    return getReviewStatus(approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
 }
 function getReviews(octokit, owner, repo, pullNumber) {
     return octokit.paginate(octokit.rest.pulls.listReviews, {
@@ -46607,10 +46605,7 @@ function getReviewComments(octokit, owner, repo, pullNumber, cursor) {
         cursor: cursor,
     });
 }
-function getReviewStatus(pullRequest, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals) {
-    if (pullRequest.draft) {
-        return CustomPullRequestReviewStatus.DRAFT;
-    }
+function getReviewStatus(approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals) {
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {
         return CustomPullRequestReviewStatus.CHANGES_REQUESTED;
     }
@@ -46626,23 +46621,17 @@ function getReviewStatus(pullRequest, approvedReviews, changesRequestedReviews, 
 
 
 async function runLabelMode() {
-    // Get the context
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
-    // Parse the inputs
     const githubToken = core.getInput(Input.GITHUB_TOKEN, { required: true });
     const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
     const pullNumber = parseInt(core.getInput(Input.PULL_NUMBER, { required: true }), 10);
     const pendingReviewLabel = core.getInput(Input.PENDING_REVIEW_LABEL, { required: true });
     const changesRequestedLabel = core.getInput(Input.CHANGES_REQUESTED_LABEL, { required: true });
     const approvedLabel = core.getInput(Input.APPROVED_LABEL, { required: true });
-    // Initialize the Octokit client
     const octokit = github.getOctokit(githubToken);
-    // Get the pull request
     const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
-    // Get the review status of the pull request
     const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
-    // Label the pull request according to the review status
     await labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel);
 }
 async function getPullRequest(octokit, owner, repo, pullNumber) {
@@ -46718,33 +46707,31 @@ var dist = __nccwpck_require__(5105);
 
 
 async function runReportMode() {
-    // Get the context
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
-    // Parse the inputs
     const githubToken = core.getInput(Input.GITHUB_TOKEN, { required: true });
     const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
     const slackToken = core.getInput(Input.SLACK_TOKEN, { required: true });
     const slackChannel = core.getInput(Input.SLACK_CHANNEL, { required: true });
-    // Initialize the Octokit client
     const octokit = github.getOctokit(githubToken);
-    // Get the open pull requests
-    const pullRequests = await getOpenPullRequests(octokit, owner, repo);
-    // Get the review status of the pull requests
+    let pullRequests = await getOpenPullRequests(octokit, owner, repo);
+    pullRequests = filterDraftPullRequests(pullRequests);
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
-    // Build the message
-    const message = buildSlackMessage(pullRequestsByReviewStatus);
-    // Send the message
+    const message = buildSlackMessage(pullRequests, pullRequestsByReviewStatus);
     await sendSlackMessage(slackToken, slackChannel, message);
 }
-function getOpenPullRequests(octokit, owner, repo) {
-    return octokit.paginate(octokit.rest.pulls.list, {
+async function getOpenPullRequests(octokit, owner, repo) {
+    const response = await octokit.paginate(octokit.rest.pulls.list, {
         owner: owner,
         repo: repo,
         state: "open",
         sort: "created",
         direction: "asc",
     });
+    return response;
+}
+function filterDraftPullRequests(pullRequests) {
+    return pullRequests.filter((pullRequest) => !pullRequest.draft);
 }
 async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals) {
     const result = new Map();
@@ -46755,13 +46742,10 @@ async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequest
     }
     return result;
 }
-function buildSlackMessage(pullRequestsByReviewStatus) {
-    const pendingPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [];
-    const changesRequestedPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [];
-    const approvedPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [];
-    const totalOpenPullRequests = pendingPullRequests.length + changesRequestedPullRequests.length + approvedPullRequests.length;
+function buildSlackMessage(pullRequests, pullRequestsByReviewStatus) {
     const text = "Pull Request Summary";
     const blocks = [];
+    const spacer = buildSpacerSectionBlock();
     blocks.push({
         type: "section",
         text: {
@@ -46773,52 +46757,61 @@ function buildSlackMessage(pullRequestsByReviewStatus) {
         type: "section",
         text: {
             type: "mrkdwn",
-            text: `*Total open PRs*: ${totalOpenPullRequests}`,
+            text: `*Total open PRs*: ${pullRequests.length}`,
         },
     });
-    blocks.push({
+    blocks.push(spacer);
+    blocks.push(buildPullRequestGroupBlock("eyes", "Pending review", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? []));
+    blocks.push(spacer);
+    blocks.push(buildPullRequestGroupBlock("pencil2", "Changes requested", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
+    blocks.push(spacer);
+    blocks.push(buildPullRequestGroupBlock("white_check_mark", "Approved", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? []));
+    blocks.push(spacer);
+    return { text, blocks };
+}
+function buildSpacerSectionBlock() {
+    return {
         type: "section",
         text: {
             type: "mrkdwn",
             text: " ",
         },
-    });
-    blocks.push(buildPullRequestReviewSection("eyes", "Pending review", pendingPullRequests));
-    blocks.push(buildPullRequestReviewSection("pencil2", "Changes requested", changesRequestedPullRequests));
-    blocks.push(buildPullRequestReviewSection("white_check_mark", "Approved", approvedPullRequests));
-    return { text, blocks };
+    };
 }
-function buildPullRequestReviewSection(emoji, title, pullRequests) {
+function buildPullRequestGroupBlock(emoji, title, pullRequests) {
     return {
         type: "rich_text",
+        elements: [buildPullRequestGroupTitle(emoji, title, pullRequests), buildPullRequestGroupList(pullRequests)],
+    };
+}
+function buildPullRequestGroupTitle(emoji, title, pullRequests) {
+    return {
+        type: "rich_text_section",
         elements: [
             {
-                type: "rich_text_section",
-                elements: [
-                    {
-                        type: "emoji",
-                        name: emoji,
-                    },
-                    {
-                        type: "text",
-                        text: " ",
-                    },
-                    {
-                        type: "text",
-                        text: `${title} (${pullRequests.length})`,
-                        style: {
-                            bold: true,
-                        },
-                    },
-                ],
+                type: "emoji",
+                name: emoji,
             },
             {
-                type: "rich_text_list",
-                style: "bullet",
-                indent: 0,
-                elements: buildPullRequestListItems(pullRequests),
+                type: "text",
+                text: " ",
+            },
+            {
+                type: "text",
+                text: `${title} (${pullRequests.length})`,
+                style: {
+                    bold: true,
+                },
             },
         ],
+    };
+}
+function buildPullRequestGroupList(pullRequests) {
+    return {
+        type: "rich_text_list",
+        style: "bullet",
+        indent: 0,
+        elements: buildPullRequestListItems(pullRequests),
     };
 }
 function buildPullRequestListItems(pullRequests) {
@@ -46829,15 +46822,7 @@ function buildPullRequestListItems(pullRequests) {
         }
     }
     else {
-        listItems.push({
-            type: "rich_text_section",
-            elements: [
-                {
-                    type: "text",
-                    text: "None",
-                },
-            ],
-        });
+        listItems.push(buildPullRequestEmptyListItem());
     }
     return listItems;
 }
@@ -46858,6 +46843,17 @@ function buildPullRequestListItem(pullRequest) {
                 type: "link",
                 url: pullRequest.user.html_url,
                 text: `@${pullRequest.user.login}`,
+            },
+        ],
+    };
+}
+function buildPullRequestEmptyListItem() {
+    return {
+        type: "rich_text_section",
+        elements: [
+            {
+                type: "text",
+                text: "None",
             },
         ],
     };

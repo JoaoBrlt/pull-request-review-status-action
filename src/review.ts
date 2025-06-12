@@ -14,18 +14,18 @@ export async function reviewPullRequest(
     pullRequest: PullRequest,
     requiredApprovals: number,
 ) {
-    // Get pull request reviews
+    if (pullRequest.draft) {
+        return CustomPullRequestReviewStatus.DRAFT;
+    }
+
     const reviews = await getReviews(octokit, owner, repo, pullRequest.number);
 
-    // Get the latest review of each user
     const latestReviewPerUser = getLatestReviewPerUser(reviews, pullRequest.user.id);
 
-    // Group pull request reviews by state
     const reviewsByState = groupReviewsByState(latestReviewPerUser);
     const approvedReviews = (reviewsByState.get(PullRequestReviewState.APPROVED) ?? []).length;
     const changesRequestedReviews = (reviewsByState.get(PullRequestReviewState.CHANGES_REQUESTED) ?? []).length;
 
-    // Count unresolved pull request review comments
     const unresolvedReviewComments = await countUnresolvedReviewComments(
         octokit,
         owner,
@@ -34,14 +34,7 @@ export async function reviewPullRequest(
         pullRequest.user.login,
     );
 
-    // Determine the review status of the pull request
-    return getReviewStatus(
-        pullRequest,
-        approvedReviews,
-        changesRequestedReviews,
-        unresolvedReviewComments,
-        requiredApprovals,
-    );
+    return getReviewStatus(approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
 }
 
 function getReviews(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
@@ -172,15 +165,11 @@ function getReviewComments(
 }
 
 function getReviewStatus(
-    pullRequest: PullRequest,
     approvedReviews: number,
     changesRequestedReviews: number,
     unresolvedReviewComments: number,
     requiredApprovals: number,
 ) {
-    if (pullRequest.draft) {
-        return CustomPullRequestReviewStatus.DRAFT;
-    }
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {
         return CustomPullRequestReviewStatus.CHANGES_REQUESTED;
     }
