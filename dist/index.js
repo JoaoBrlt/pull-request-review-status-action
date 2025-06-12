@@ -46456,24 +46456,58 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7484);
+;// CONCATENATED MODULE: ./src/types.ts
+var Input;
+(function (Input) {
+    // Common
+    Input["GITHUB_TOKEN"] = "github-token";
+    Input["RUN_MODE"] = "run-mode";
+    Input["REQUIRED_APPROVALS"] = "required-approvals";
+    // Label
+    Input["PULL_NUMBER"] = "pull-number";
+    Input["PENDING_REVIEW_LABEL"] = "pending-review-label";
+    Input["CHANGES_REQUESTED_LABEL"] = "changes-requested-label";
+    Input["APPROVED_LABEL"] = "approved-label";
+    // Report
+    Input["SLACK_TOKEN"] = "slack-token";
+    Input["SLACK_CHANNEL"] = "slack-channel";
+})(Input || (Input = {}));
+var RunMode;
+(function (RunMode) {
+    RunMode["LABEL"] = "label";
+    RunMode["REPORT"] = "report";
+})(RunMode || (RunMode = {}));
+var PullRequestReviewState;
+(function (PullRequestReviewState) {
+    PullRequestReviewState["APPROVED"] = "APPROVED";
+    PullRequestReviewState["COMMENTED"] = "COMMENTED";
+    PullRequestReviewState["CHANGES_REQUESTED"] = "CHANGES_REQUESTED";
+})(PullRequestReviewState || (PullRequestReviewState = {}));
+var CustomPullRequestReviewStatus;
+(function (CustomPullRequestReviewStatus) {
+    CustomPullRequestReviewStatus["DRAFT"] = "draft";
+    CustomPullRequestReviewStatus["PENDING_REVIEW"] = "pending_review";
+    CustomPullRequestReviewStatus["CHANGES_REQUESTED"] = "changed_requested";
+    CustomPullRequestReviewStatus["APPROVED"] = "approved";
+})(CustomPullRequestReviewStatus || (CustomPullRequestReviewStatus = {}));
+
 // EXTERNAL MODULE: ./node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(3228);
-// EXTERNAL MODULE: ./node_modules/@slack/web-api/dist/index.js
-var dist = __nccwpck_require__(5105);
-;// CONCATENATED MODULE: ./src/main.ts
+;// CONCATENATED MODULE: ./src/review.ts
 
-
-
-var PullRequestReviewStatus;
-(function (PullRequestReviewStatus) {
-    PullRequestReviewStatus[PullRequestReviewStatus["DRAFT"] = 0] = "DRAFT";
-    PullRequestReviewStatus[PullRequestReviewStatus["PENDING_REVIEW"] = 1] = "PENDING_REVIEW";
-    PullRequestReviewStatus[PullRequestReviewStatus["CHANGES_REQUESTED"] = 2] = "CHANGES_REQUESTED";
-    PullRequestReviewStatus[PullRequestReviewStatus["APPROVED"] = 3] = "APPROVED";
-})(PullRequestReviewStatus || (PullRequestReviewStatus = {}));
-async function getPullRequest(octokit, owner, repo, pullNumber) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data;
+async function reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals) {
+    // Get pull request reviews
+    const reviews = await getReviews(octokit, owner, repo, pullRequest.number);
+    // Get the latest review of each user
+    const latestReviewPerUser = getLatestReviewPerUser(reviews, pullRequest.user.id);
+    // Group pull request reviews by state
+    const reviewsByState = groupReviewsByState(latestReviewPerUser);
+    const approvedReviews = (reviewsByState.get(PullRequestReviewState.APPROVED) ?? []).length;
+    const changesRequestedReviews = (reviewsByState.get(PullRequestReviewState.CHANGES_REQUESTED) ?? []).length;
+    // Count unresolved pull request review comments
+    const unresolvedReviewComments = await countUnresolvedReviewComments(octokit, owner, repo, pullRequest.number, pullRequest.user.login);
+    // Compute the review status
+    return computeReviewStatus(pullRequest.draft ?? false, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
 }
 function getReviews(octokit, owner, repo, pullNumber) {
     return octokit.paginate(octokit.rest.pulls.listReviews, {
@@ -46494,7 +46528,8 @@ function getLatestReviewPerUser(reviews, author_id) {
             continue;
         }
         // Skip "Commented" reviews as they are handled differently
-        if (review.state === "COMMENTED") {
+        const reviewState = review.state;
+        if (reviewState === PullRequestReviewState.COMMENTED) {
             continue;
         }
         // Always keep the latest review
@@ -46505,8 +46540,39 @@ function getLatestReviewPerUser(reviews, author_id) {
 function groupReviewsByState(latestReviewPerUser) {
     const result = new Map();
     for (const review of latestReviewPerUser.values()) {
-        const previousReviews = result.get(review.state) ?? [];
-        result.set(review.state, [...previousReviews, review]);
+        const reviewState = review.state;
+        const previousReviews = result.get(reviewState) ?? [];
+        result.set(reviewState, [...previousReviews, review]);
+    }
+    return result;
+}
+async function countUnresolvedReviewComments(octokit, owner, repo, pullNumber, authorLogin) {
+    let result = 0;
+    let hasNextPage = true;
+    let cursor = null;
+    while (hasNextPage) {
+        const response = await getReviewComments(octokit, owner, repo, pullNumber, cursor);
+        // Skip if the response is invalid
+        if (response.repository.pullRequest?.reviewThreads?.nodes == null) {
+            hasNextPage = false;
+            continue;
+        }
+        for (const reviewThread of response.repository.pullRequest.reviewThreads.nodes) {
+            // Skip if the review comment is invalid
+            if (reviewThread?.comments?.nodes?.[0]?.author == null) {
+                continue;
+            }
+            // Skip review comments from the author
+            if (reviewThread.comments.nodes[0].author.login === authorLogin) {
+                continue;
+            }
+            // Check the resolve status
+            if (!reviewThread.isResolved) {
+                result++;
+            }
+        }
+        hasNextPage = response.repository.pullRequest.reviewThreads.pageInfo.hasNextPage;
+        cursor = response.repository.pullRequest.reviewThreads.pageInfo.endCursor;
     }
     return result;
 }
@@ -46541,61 +46607,47 @@ function getReviewComments(octokit, owner, repo, pullNumber, cursor) {
         cursor: cursor,
     });
 }
-async function countUnresolvedReviewComments(octokit, owner, repo, pullNumber, authorLogin) {
-    let result = 0;
-    let hasNextPage = true;
-    let cursor = null;
-    while (hasNextPage) {
-        const response = await getReviewComments(octokit, owner, repo, pullNumber, cursor);
-        // Skip if the response is invalid
-        if (response.repository.pullRequest?.reviewThreads?.nodes == null) {
-            hasNextPage = false;
-            continue;
-        }
-        for (const reviewThread of response.repository.pullRequest.reviewThreads.nodes) {
-            // Skip if the review comment is invalid
-            if (reviewThread?.comments?.nodes?.[0]?.author == null) {
-                continue;
-            }
-            // Skip review comments from the author
-            if (reviewThread.comments.nodes[0].author.login === authorLogin) {
-                continue;
-            }
-            // Check the resolve status
-            if (!reviewThread.isResolved) {
-                result++;
-            }
-        }
-        hasNextPage = response.repository.pullRequest.reviewThreads.pageInfo.hasNextPage;
-        cursor = response.repository.pullRequest.reviewThreads.pageInfo.endCursor;
-    }
-    return result;
-}
-function getReviewStatus(isDraft, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals) {
+function computeReviewStatus(isDraft, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals) {
     if (isDraft) {
-        return PullRequestReviewStatus.DRAFT;
+        return CustomPullRequestReviewStatus.DRAFT;
     }
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {
-        return PullRequestReviewStatus.CHANGES_REQUESTED;
+        return CustomPullRequestReviewStatus.CHANGES_REQUESTED;
     }
     if (approvedReviews >= requiredApprovals) {
-        return PullRequestReviewStatus.APPROVED;
+        return CustomPullRequestReviewStatus.APPROVED;
     }
-    return PullRequestReviewStatus.PENDING_REVIEW;
+    return CustomPullRequestReviewStatus.PENDING_REVIEW;
 }
-async function reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals) {
-    // Get pull request reviews
-    const reviews = await getReviews(octokit, owner, repo, pullRequest.number);
-    // Get the latest review of each user
-    const latestReviewPerUser = getLatestReviewPerUser(reviews, pullRequest.user.id);
-    // Group pull request reviews by state
-    const reviewsByState = groupReviewsByState(latestReviewPerUser);
-    const approvedReviews = (reviewsByState.get("APPROVED") ?? []).length;
-    const changesRequestedReviews = (reviewsByState.get("CHANGES_REQUESTED") ?? []).length;
-    // Count unresolved pull request review comments
-    const unresolvedReviewComments = await countUnresolvedReviewComments(octokit, owner, repo, pullRequest.number, pullRequest.user.login);
-    // Determine the review status
-    return getReviewStatus(pullRequest.draft ?? false, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
+
+;// CONCATENATED MODULE: ./src/label.ts
+
+
+
+
+async function runLabelMode() {
+    // Get the context
+    const owner = github.context.repo.owner;
+    const repo = github.context.repo.repo;
+    // Parse the inputs
+    const githubToken = core.getInput(Input.GITHUB_TOKEN, { required: true });
+    const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
+    const pullNumber = parseInt(core.getInput(Input.PULL_NUMBER, { required: true }), 10);
+    const pendingReviewLabel = core.getInput(Input.PENDING_REVIEW_LABEL, { required: true });
+    const changesRequestedLabel = core.getInput(Input.CHANGES_REQUESTED_LABEL, { required: true });
+    const approvedLabel = core.getInput(Input.APPROVED_LABEL, { required: true });
+    // Initialize the Octokit client
+    const octokit = github.getOctokit(githubToken);
+    // Get the pull request
+    const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
+    // Determine the review status of the pull request
+    const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
+    // Label the pull request according to the review status
+    await labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel);
+}
+async function getPullRequest(octokit, owner, repo, pullNumber) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data;
 }
 async function getLabels(octokit, owner, repo, pullNumber) {
     const labels = await octokit.paginate(octokit.rest.issues.listLabelsOnIssue, {
@@ -46642,19 +46694,48 @@ async function updateLabels(octokit, owner, repo, pullNumber, labelsToAdd, label
 }
 async function labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel) {
     switch (reviewStatus) {
-        case PullRequestReviewStatus.DRAFT:
+        case CustomPullRequestReviewStatus.DRAFT:
             await updateLabels(octokit, owner, repo, pullNumber, [], [pendingReviewLabel, changesRequestedLabel, approvedLabel]);
             break;
-        case PullRequestReviewStatus.PENDING_REVIEW:
+        case CustomPullRequestReviewStatus.PENDING_REVIEW:
             await updateLabels(octokit, owner, repo, pullNumber, [pendingReviewLabel], [changesRequestedLabel, approvedLabel]);
             break;
-        case PullRequestReviewStatus.CHANGES_REQUESTED:
+        case CustomPullRequestReviewStatus.CHANGES_REQUESTED:
             await updateLabels(octokit, owner, repo, pullNumber, [changesRequestedLabel], [pendingReviewLabel, approvedLabel]);
             break;
-        case PullRequestReviewStatus.APPROVED:
+        case CustomPullRequestReviewStatus.APPROVED:
             await updateLabels(octokit, owner, repo, pullNumber, [approvedLabel], [pendingReviewLabel, changesRequestedLabel]);
             break;
     }
+}
+
+// EXTERNAL MODULE: ./node_modules/@slack/web-api/dist/index.js
+var dist = __nccwpck_require__(5105);
+;// CONCATENATED MODULE: ./src/report.ts
+
+
+
+
+
+async function runReportMode() {
+    // Get the context
+    const owner = github.context.repo.owner;
+    const repo = github.context.repo.repo;
+    // Parse the inputs
+    const githubToken = core.getInput(Input.GITHUB_TOKEN, { required: true });
+    const requiredApprovals = parseInt(core.getInput(Input.REQUIRED_APPROVALS, { required: true }), 10);
+    const slackToken = core.getInput(Input.SLACK_TOKEN, { required: true });
+    const slackChannel = core.getInput(Input.SLACK_CHANNEL, { required: true });
+    // Initialize the Octokit client
+    const octokit = github.getOctokit(githubToken);
+    // Get the pull requests
+    const pullRequests = await getPullRequests(octokit, owner, repo);
+    // Review the pull requests
+    const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
+    // Build the message
+    const message = buildSlackMessage(pullRequestsByReviewStatus);
+    // Send the message
+    await sendSlackMessage(slackToken, slackChannel, message);
 }
 function getPullRequests(octokit, owner, repo) {
     return octokit.paginate(octokit.rest.pulls.list, {
@@ -46674,26 +46755,20 @@ async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequest
     }
     return result;
 }
-async function runLabelMode() {
-    // Parse the inputs
-    const githubToken = core.getInput("github-token", { required: true });
-    const requiredApprovals = parseInt(core.getInput("required-approvals", { required: true }), 10);
-    const pullNumber = parseInt(core.getInput("pull-number", { required: true }), 10);
-    const pendingReviewLabel = core.getInput("pending-review-label", { required: true });
-    const changesRequestedLabel = core.getInput("changes-requested-label", { required: true });
-    const approvedLabel = core.getInput("approved-label", { required: true });
-    // Get the context
-    const context = github.context;
-    const owner = context.repo.owner;
-    const repo = context.repo.repo;
-    // Initialize the Octokit client
-    const octokit = github.getOctokit(githubToken);
-    // Get the pull request
-    const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
-    // Determine the review status of the pull request
-    const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
-    // Label the pull request according to the review status
-    await labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel);
+function buildSlackMessage(pullRequestsByReviewStatus) {
+    const text = "Code Review Recap";
+    const blocks = [];
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: ":loudspeaker: *Code Review Recap* :loudspeaker:",
+        },
+    });
+    blocks.push(...buildPullRequestReviewSection(":eyes: *Pending*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? []));
+    blocks.push(...buildPullRequestReviewSection(":pencil2: *Changes requested*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
+    blocks.push(...buildPullRequestReviewSection(":white_check_mark: *Approved*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? []));
+    return { text, blocks };
 }
 function buildPullRequestReviewSection(title, pullRequests) {
     const blocks = [];
@@ -46742,9 +46817,8 @@ function buildPullRequestListItem(pullRequest) {
         type: "rich_text_section",
         elements: [
             {
-                type: "link",
-                url: pullRequest.html_url,
-                text: pullRequest.title + " (#" + pullRequest.number + ")",
+                type: "text",
+                text: pullRequest.title,
             },
             {
                 type: "text",
@@ -46755,28 +46829,24 @@ function buildPullRequestListItem(pullRequest) {
                 url: pullRequest.user.html_url,
                 text: "@" + pullRequest.user.login,
             },
+            {
+                type: "text",
+                text: " in ",
+            },
+            {
+                type: "link",
+                url: pullRequest.html_url,
+                text: "#" + pullRequest.number,
+            },
         ],
     };
-}
-function buildSlackMessage(pullRequestsByReviewStatus) {
-    const blocks = [];
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: ":loudspeaker: *Code Review Recap* :loudspeaker:",
-        },
-    });
-    blocks.push(...buildPullRequestReviewSection(":eyes: *Pending*", pullRequestsByReviewStatus.get(PullRequestReviewStatus.PENDING_REVIEW) ?? []));
-    blocks.push(...buildPullRequestReviewSection(":pencil2: *Changes requested*", pullRequestsByReviewStatus.get(PullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
-    blocks.push(...buildPullRequestReviewSection(":white_check_mark: *Approved*", pullRequestsByReviewStatus.get(PullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
-    return { blocks };
 }
 async function sendSlackMessage(slackToken, slackChannel, message) {
     const slackClient = new dist.WebClient(slackToken);
     try {
         await slackClient.chat.postMessage({
             channel: slackChannel,
+            text: message.text,
             blocks: message.blocks,
             unfurl_links: false,
             unfurl_media: false,
@@ -46784,45 +46854,23 @@ async function sendSlackMessage(slackToken, slackChannel, message) {
         core.info("Successfully sent the message!");
     }
     catch (error) {
-        // eslint-disable-next-line  @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        if (error.code === dist.ErrorCode.PlatformError) {
-            // eslint-disable-next-line  @typescript-eslint/ban-ts-comment
-            // @ts-ignore
-            console.log(error.data);
-        }
-        core.setFailed("Failed to send the message.");
+        core.setFailed("Failed to send the message: " + (error instanceof Error ? error.message : String(error)));
     }
 }
-async function runReportMode() {
-    // Parse the inputs
-    const githubToken = core.getInput("github-token", { required: true });
-    const requiredApprovals = parseInt(core.getInput("required-approvals", { required: true }), 10);
-    const slackToken = core.getInput("slack-token", { required: true });
-    const slackChannel = core.getInput("slack-channel", { required: true });
-    // Get the context
-    const context = github.context;
-    const owner = context.repo.owner;
-    const repo = context.repo.repo;
-    // Initialize the Octokit client
-    const octokit = github.getOctokit(githubToken);
-    // Get the pull requests
-    const pullRequests = await getPullRequests(octokit, owner, repo);
-    // Review the pull requests
-    const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
-    // Build the message
-    const message = buildSlackMessage(pullRequestsByReviewStatus);
-    // Send the message
-    await sendSlackMessage(slackToken, slackChannel, message);
-}
+
+;// CONCATENATED MODULE: ./src/main.ts
+
+
+
+
 async function run() {
     try {
-        const runMode = core.getInput("run-mode");
+        const runMode = core.getInput(Input.RUN_MODE, { required: true });
         switch (runMode) {
-            case "label":
+            case RunMode.LABEL:
                 await runLabelMode();
                 break;
-            case "report":
+            case RunMode.REPORT:
                 await runReportMode();
                 break;
             default:
@@ -46831,7 +46879,7 @@ async function run() {
         }
     }
     catch (error) {
-        core.setFailed("Failed to run the action: " + (error instanceof Error ? error.message : ""));
+        core.setFailed("Failed to run the action: " + (error instanceof Error ? error.message : String(error)));
     }
 }
 
