@@ -2,7 +2,7 @@ import { CustomPullRequestReviewStatus, Input, OctokitClient, PullRequest, Slack
 import { AnyBlock, RichTextSection } from "@slack/types";
 import * as github from "@actions/github";
 import * as core from "@actions/core";
-import { WebClient } from "@slack/web-api";
+import { RichTextBlock, WebClient } from "@slack/web-api";
 import { reviewPullRequest } from "./review";
 
 export async function runReportMode() {
@@ -19,10 +19,10 @@ export async function runReportMode() {
     // Initialize the Octokit client
     const octokit = github.getOctokit(githubToken);
 
-    // Get the pull requests
-    const pullRequests = await getPullRequests(octokit, owner, repo);
+    // Get the open pull requests
+    const pullRequests = await getOpenPullRequests(octokit, owner, repo);
 
-    // Review the pull requests
+    // Get the review status of the pull requests
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(
         octokit,
         owner,
@@ -38,7 +38,7 @@ export async function runReportMode() {
     await sendSlackMessage(slackToken, slackChannel, message);
 }
 
-function getPullRequests(octokit: OctokitClient, owner: string, repo: string) {
+function getOpenPullRequests(octokit: OctokitClient, owner: string, repo: string) {
     return octokit.paginate(octokit.rest.pulls.list, {
         owner: owner,
         repo: repo,
@@ -67,33 +67,53 @@ async function groupPullRequestsByReviewStatus(
 function buildSlackMessage(
     pullRequestsByReviewStatus: Map<CustomPullRequestReviewStatus, PullRequest[]>,
 ): SlackMessage {
-    const text = "Code Review Recap";
+    const pendingPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [];
+    const changesRequestedPullRequests =
+        pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [];
+    const approvedPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [];
+    const totalOpenPullRequests =
+        pendingPullRequests.length + changesRequestedPullRequests.length + approvedPullRequests.length;
+
+    const text = "Pull Request Summary";
     const blocks: AnyBlock[] = [];
     blocks.push({
         type: "section",
         text: {
             type: "mrkdwn",
-            text: ":loudspeaker: *Code Review Recap* :loudspeaker:",
+            text: ":loudspeaker: *Pull Request Summary* :loudspeaker:",
         },
     });
-    blocks.push(
-        ...buildPullRequestReviewSection(
-            ":eyes: *Pending*",
-            pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [],
-        ),
-    );
-    blocks.push(
-        ...buildPullRequestReviewSection(
-            ":pencil2: *Changes requested*",
-            pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [],
-        ),
-    );
-    blocks.push(
-        ...buildPullRequestReviewSection(
-            ":white_check_mark: *Approved*",
-            pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [],
-        ),
-    );
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: `*Total open PRs*: ${totalOpenPullRequests}`,
+        },
+    });
+    blocks.push(buildPullRequestReviewSection("eyes", "Pending review", pendingPullRequests));
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
+    blocks.push(buildPullRequestReviewSection("pencil2", "Changes requested", changesRequestedPullRequests));
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
+    blocks.push(buildPullRequestReviewSection("white_check_mark", "Approved", approvedPullRequests));
     blocks.push({
         type: "section",
         text: {
@@ -104,18 +124,30 @@ function buildSlackMessage(
     return { text, blocks };
 }
 
-function buildPullRequestReviewSection(title: string, pullRequests: PullRequest[]): AnyBlock[] {
-    const blocks: AnyBlock[] = [];
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: title,
-        },
-    });
-    blocks.push({
+function buildPullRequestReviewSection(emoji: string, title: string, pullRequests: PullRequest[]): RichTextBlock {
+    return {
         type: "rich_text",
         elements: [
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "emoji",
+                        name: emoji,
+                    },
+                    {
+                        type: "text",
+                        text: " ",
+                    },
+                    {
+                        type: "text",
+                        text: `${title} (${pullRequests.length})`,
+                        style: {
+                            bold: true,
+                        },
+                    },
+                ],
+            },
             {
                 type: "rich_text_list",
                 style: "bullet",
@@ -123,8 +155,7 @@ function buildPullRequestReviewSection(title: string, pullRequests: PullRequest[
                 elements: buildPullRequestListItems(pullRequests),
             },
         ],
-    });
-    return blocks;
+    };
 }
 
 function buildPullRequestListItems(pullRequests: PullRequest[]): RichTextSection[] {
@@ -152,8 +183,9 @@ function buildPullRequestListItem(pullRequest: PullRequest): RichTextSection {
         type: "rich_text_section",
         elements: [
             {
-                type: "text",
-                text: pullRequest.title,
+                type: "link",
+                url: pullRequest.html_url,
+                text: `${pullRequest.title} (#${pullRequest.number})`,
             },
             {
                 type: "text",
@@ -162,16 +194,7 @@ function buildPullRequestListItem(pullRequest: PullRequest): RichTextSection {
             {
                 type: "link",
                 url: pullRequest.user.html_url,
-                text: "@" + pullRequest.user.login,
-            },
-            {
-                type: "text",
-                text: " in ",
-            },
-            {
-                type: "link",
-                url: pullRequest.html_url,
-                text: "#" + pullRequest.number,
+                text: `@${pullRequest.user.login}`,
             },
         ],
     };

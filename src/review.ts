@@ -34,9 +34,9 @@ export async function reviewPullRequest(
         pullRequest.user.login,
     );
 
-    // Compute the review status
-    return computeReviewStatus(
-        pullRequest.draft ?? false,
+    // Determine the review status of the pull request
+    return getReviewStatus(
+        pullRequest,
         approvedReviews,
         changesRequestedReviews,
         unresolvedReviewComments,
@@ -171,14 +171,14 @@ function getReviewComments(
     });
 }
 
-function computeReviewStatus(
-    isDraft: boolean,
+function getReviewStatus(
+    pullRequest: PullRequest,
     approvedReviews: number,
     changesRequestedReviews: number,
     unresolvedReviewComments: number,
     requiredApprovals: number,
 ) {
-    if (isDraft) {
+    if (pullRequest.draft) {
         return CustomPullRequestReviewStatus.DRAFT;
     }
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {

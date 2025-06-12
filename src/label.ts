@@ -1,4 +1,4 @@
-import { Input, OctokitClient, PullRequest, CustomPullRequestReviewStatus } from "./types";
+import { CustomPullRequestReviewStatus, Input, OctokitClient, PullRequest } from "./types";
 import * as github from "@actions/github";
 import * as core from "@actions/core";
 import { reviewPullRequest } from "./review";
@@ -22,7 +22,7 @@ export async function runLabelMode() {
     // Get the pull request
     const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
 
-    // Determine the review status of the pull request
+    // Get the review status of the pull request
     const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest as PullRequest, requiredApprovals);
 
     // Label the pull request according to the review status

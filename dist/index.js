@@ -46506,8 +46506,8 @@ async function reviewPullRequest(octokit, owner, repo, pullRequest, requiredAppr
     const changesRequestedReviews = (reviewsByState.get(PullRequestReviewState.CHANGES_REQUESTED) ?? []).length;
     // Count unresolved pull request review comments
     const unresolvedReviewComments = await countUnresolvedReviewComments(octokit, owner, repo, pullRequest.number, pullRequest.user.login);
-    // Compute the review status
-    return computeReviewStatus(pullRequest.draft ?? false, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
+    // Determine the review status of the pull request
+    return getReviewStatus(pullRequest, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
 }
 function getReviews(octokit, owner, repo, pullNumber) {
     return octokit.paginate(octokit.rest.pulls.listReviews, {
@@ -46607,8 +46607,8 @@ function getReviewComments(octokit, owner, repo, pullNumber, cursor) {
         cursor: cursor,
     });
 }
-function computeReviewStatus(isDraft, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals) {
-    if (isDraft) {
+function getReviewStatus(pullRequest, approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals) {
+    if (pullRequest.draft) {
         return CustomPullRequestReviewStatus.DRAFT;
     }
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {
@@ -46640,7 +46640,7 @@ async function runLabelMode() {
     const octokit = github.getOctokit(githubToken);
     // Get the pull request
     const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
-    // Determine the review status of the pull request
+    // Get the review status of the pull request
     const reviewStatus = await reviewPullRequest(octokit, owner, repo, pullRequest, requiredApprovals);
     // Label the pull request according to the review status
     await labelPullRequest(octokit, owner, repo, pullNumber, reviewStatus, pendingReviewLabel, changesRequestedLabel, approvedLabel);
@@ -46728,16 +46728,16 @@ async function runReportMode() {
     const slackChannel = core.getInput(Input.SLACK_CHANNEL, { required: true });
     // Initialize the Octokit client
     const octokit = github.getOctokit(githubToken);
-    // Get the pull requests
-    const pullRequests = await getPullRequests(octokit, owner, repo);
-    // Review the pull requests
+    // Get the open pull requests
+    const pullRequests = await getOpenPullRequests(octokit, owner, repo);
+    // Get the review status of the pull requests
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
     // Build the message
     const message = buildSlackMessage(pullRequestsByReviewStatus);
     // Send the message
     await sendSlackMessage(slackToken, slackChannel, message);
 }
-function getPullRequests(octokit, owner, repo) {
+function getOpenPullRequests(octokit, owner, repo) {
     return octokit.paginate(octokit.rest.pulls.list, {
         owner: owner,
         repo: repo,
@@ -46756,18 +46756,50 @@ async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequest
     return result;
 }
 function buildSlackMessage(pullRequestsByReviewStatus) {
-    const text = "Code Review Recap";
+    const pendingPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? [];
+    const changesRequestedPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? [];
+    const approvedPullRequests = pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? [];
+    const totalOpenPullRequests = pendingPullRequests.length + changesRequestedPullRequests.length + approvedPullRequests.length;
+    const text = "Pull Request Summary";
     const blocks = [];
     blocks.push({
         type: "section",
         text: {
             type: "mrkdwn",
-            text: ":loudspeaker: *Code Review Recap* :loudspeaker:",
+            text: ":loudspeaker: *Pull Request Summary* :loudspeaker:",
         },
     });
-    blocks.push(...buildPullRequestReviewSection(":eyes: *Pending*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.PENDING_REVIEW) ?? []));
-    blocks.push(...buildPullRequestReviewSection(":pencil2: *Changes requested*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.CHANGES_REQUESTED) ?? []));
-    blocks.push(...buildPullRequestReviewSection(":white_check_mark: *Approved*", pullRequestsByReviewStatus.get(CustomPullRequestReviewStatus.APPROVED) ?? []));
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: `*Total open PRs*: ${totalOpenPullRequests}`,
+        },
+    });
+    blocks.push(buildPullRequestReviewSection("eyes", "Pending review", pendingPullRequests));
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
+    blocks.push(buildPullRequestReviewSection("pencil2", "Changes requested", changesRequestedPullRequests));
+    blocks.push({
+        type: "section",
+        text: {
+            type: "mrkdwn",
+            text: " ",
+        },
+    });
+    blocks.push(buildPullRequestReviewSection("white_check_mark", "Approved", approvedPullRequests));
     blocks.push({
         type: "section",
         text: {
@@ -46777,18 +46809,30 @@ function buildSlackMessage(pullRequestsByReviewStatus) {
     });
     return { text, blocks };
 }
-function buildPullRequestReviewSection(title, pullRequests) {
-    const blocks = [];
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: title,
-        },
-    });
-    blocks.push({
+function buildPullRequestReviewSection(emoji, title, pullRequests) {
+    return {
         type: "rich_text",
         elements: [
+            {
+                type: "rich_text_section",
+                elements: [
+                    {
+                        type: "emoji",
+                        name: emoji,
+                    },
+                    {
+                        type: "text",
+                        text: " ",
+                    },
+                    {
+                        type: "text",
+                        text: `${title} (${pullRequests.length})`,
+                        style: {
+                            bold: true,
+                        },
+                    },
+                ],
+            },
             {
                 type: "rich_text_list",
                 style: "bullet",
@@ -46796,8 +46840,7 @@ function buildPullRequestReviewSection(title, pullRequests) {
                 elements: buildPullRequestListItems(pullRequests),
             },
         ],
-    });
-    return blocks;
+    };
 }
 function buildPullRequestListItems(pullRequests) {
     const listItems = [];
@@ -46824,8 +46867,9 @@ function buildPullRequestListItem(pullRequest) {
         type: "rich_text_section",
         elements: [
             {
-                type: "text",
-                text: pullRequest.title,
+                type: "link",
+                url: pullRequest.html_url,
+                text: `${pullRequest.title} (#${pullRequest.number})`,
             },
             {
                 type: "text",
@@ -46834,16 +46878,7 @@ function buildPullRequestListItem(pullRequest) {
             {
                 type: "link",
                 url: pullRequest.user.html_url,
-                text: "@" + pullRequest.user.login,
-            },
-            {
-                type: "text",
-                text: " in ",
-            },
-            {
-                type: "link",
-                url: pullRequest.html_url,
-                text: "#" + pullRequest.number,
+                text: `@${pullRequest.user.login}`,
             },
         ],
     };
