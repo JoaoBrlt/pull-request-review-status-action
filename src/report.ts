@@ -6,6 +6,9 @@ import { RichTextBlock, RichTextList, WebClient } from "@slack/web-api";
 import { reviewPullRequest } from "./review";
 import { SectionBlock } from "@slack/types/dist/block-kit/blocks";
 
+const PULL_REQUEST_FETCH_LIMIT = 10;
+const PULL_REQUEST_FETCH_DELAY = 500; // ms
+
 export async function runReportMode() {
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
@@ -48,22 +51,46 @@ async function getOpenPullRequests(octokit: OctokitClient, owner: string, repo: 
     return response as PullRequest[];
 }
 
-async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data as PullRequest;
+function filterDraftPullRequests(pullRequests: PullRequest[]) {
+    return pullRequests.filter((pullRequest) => !pullRequest.draft);
 }
 
 async function getFullPullRequests(octokit: OctokitClient, owner: string, repo: string, pullRequests: PullRequest[]) {
     const result: PullRequest[] = [];
     for (const pullRequest of pullRequests) {
-        const fullPullRequest = await getPullRequest(octokit, owner, repo, pullRequest.number);
+        const fullPullRequest = await getFullPullRequest(octokit, owner, repo, pullRequest.number);
         result.push(fullPullRequest);
     }
     return result;
 }
 
-function filterDraftPullRequests(pullRequests: PullRequest[]) {
-    return pullRequests.filter((pullRequest) => !pullRequest.draft);
+async function getFullPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+    let lastPullRequest: PullRequest;
+
+    for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_LIMIT; attempt++) {
+        console.log(`ATTEMPT: ${attempt}`);
+        const pullRequest = await getPullRequest(octokit, owner, repo, pullNumber);
+        lastPullRequest = pullRequest;
+
+        if (pullRequest.mergeable != null) {
+            return pullRequest;
+        }
+
+        if (attempt < PULL_REQUEST_FETCH_LIMIT) {
+            await sleep(PULL_REQUEST_FETCH_DELAY);
+        }
+    }
+
+    return lastPullRequest!;
+}
+
+async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data as PullRequest;
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function groupPullRequestsByReviewStatus(

@@ -46706,6 +46706,8 @@ var dist = __nccwpck_require__(5105);
 
 
 
+const PULL_REQUEST_FETCH_LIMIT = 10;
+const PULL_REQUEST_FETCH_DELAY = 500; // ms
 async function runReportMode() {
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
@@ -46733,20 +46735,38 @@ async function getOpenPullRequests(octokit, owner, repo) {
     });
     return response;
 }
-async function report_getPullRequest(octokit, owner, repo, pullNumber) {
-    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
-    return response.data;
+function filterDraftPullRequests(pullRequests) {
+    return pullRequests.filter((pullRequest) => !pullRequest.draft);
 }
 async function getFullPullRequests(octokit, owner, repo, pullRequests) {
     const result = [];
     for (const pullRequest of pullRequests) {
-        const fullPullRequest = await report_getPullRequest(octokit, owner, repo, pullRequest.number);
+        const fullPullRequest = await getFullPullRequest(octokit, owner, repo, pullRequest.number);
         result.push(fullPullRequest);
     }
     return result;
 }
-function filterDraftPullRequests(pullRequests) {
-    return pullRequests.filter((pullRequest) => !pullRequest.draft);
+async function getFullPullRequest(octokit, owner, repo, pullNumber) {
+    let lastPullRequest;
+    for (let attempt = 1; attempt <= PULL_REQUEST_FETCH_LIMIT; attempt++) {
+        console.log(`ATTEMPT: ${attempt}`);
+        const pullRequest = await report_getPullRequest(octokit, owner, repo, pullNumber);
+        lastPullRequest = pullRequest;
+        if (pullRequest.mergeable != null) {
+            return pullRequest;
+        }
+        if (attempt < PULL_REQUEST_FETCH_LIMIT) {
+            await sleep(PULL_REQUEST_FETCH_DELAY);
+        }
+    }
+    return lastPullRequest;
+}
+async function report_getPullRequest(octokit, owner, repo, pullNumber) {
+    const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
+    return response.data;
+}
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 async function groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals) {
     const result = new Map();
