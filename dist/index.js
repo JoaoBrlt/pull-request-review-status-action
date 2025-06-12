@@ -46716,6 +46716,7 @@ async function runReportMode() {
     const octokit = github.getOctokit(githubToken);
     let pullRequests = await getOpenPullRequests(octokit, owner, repo);
     pullRequests = filterDraftPullRequests(pullRequests);
+    console.log("PULL REQUESTS:", pullRequests);
     const pullRequestsByReviewStatus = await groupPullRequestsByReviewStatus(octokit, owner, repo, pullRequests, requiredApprovals);
     const message = buildSlackMessage(pullRequests, pullRequestsByReviewStatus);
     await sendSlackMessage(slackToken, slackChannel, message);
