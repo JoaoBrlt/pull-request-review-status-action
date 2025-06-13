@@ -22,6 +22,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-mode: report
           required-approvals: 1
+          stale-days: 7
           slack-token: ${{ secrets.SLACK_TOKEN }}
           slack-channel: "#notifications"
-          stale-days: 1
