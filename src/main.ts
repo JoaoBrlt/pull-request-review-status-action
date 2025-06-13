@@ -18,6 +18,6 @@ export async function run(): Promise<void> {
                 break;
         }
     } catch (error) {
-        core.setFailed("Failed to run the actionnnnn: " + (error instanceof Error ? error.message : String(error)));
+        core.setFailed("Failed to run the action: " + (error instanceof Error ? error.message : String(error)));
     }
 }
