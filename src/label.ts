@@ -3,7 +3,7 @@ import * as github from "@actions/github";
 import * as core from "@actions/core";
 import { getPullRequest, reviewPullRequest } from "./shared";
 
-export async function runLabelMode() {
+export async function runLabelMode(): Promise<void> {
     const owner = github.context.repo.owner;
     const repo = github.context.repo.repo;
 
@@ -32,7 +32,7 @@ export async function runLabelMode() {
     );
 }
 
-async function getLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+async function getLabels(octokit: OctokitClient, owner: string, repo: string, pullNumber: number): Promise<string[]> {
     const labels = await octokit.paginate(octokit.rest.issues.listLabelsOnIssue, {
         owner: owner,
         repo: repo,
@@ -41,7 +41,13 @@ async function getLabels(octokit: OctokitClient, owner: string, repo: string, pu
     return labels.map((label) => label.name);
 }
 
-async function addLabel(octokit: OctokitClient, owner: string, repo: string, pullNumber: number, label: string) {
+async function addLabel(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    label: string,
+): Promise<void> {
     await octokit.rest.issues.addLabels({
         owner: owner,
         repo: repo,
@@ -57,7 +63,7 @@ async function addLabels(
     pullNumber: number,
     currentLabels: string[],
     labelsToAdd: string[],
-) {
+): Promise<void> {
     for (const label of labelsToAdd) {
         if (!currentLabels.includes(label)) {
             await addLabel(octokit, owner, repo, pullNumber, label);
@@ -65,7 +71,13 @@ async function addLabels(
     }
 }
 
-async function removeLabel(octokit: OctokitClient, owner: string, repo: string, pullNumber: number, label: string) {
+async function removeLabel(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    label: string,
+): Promise<void> {
     await octokit.rest.issues.removeLabel({
         owner: owner,
         repo: repo,
@@ -81,7 +93,7 @@ async function removeLabels(
     pullNumber: number,
     currentLabels: string[],
     labelsToRemove: string[],
-) {
+): Promise<void> {
     for (const label of labelsToRemove) {
         if (currentLabels.includes(label)) {
             await removeLabel(octokit, owner, repo, pullNumber, label);
@@ -96,7 +108,7 @@ async function updateLabels(
     pullNumber: number,
     labelsToAdd: string[],
     labelsToRemove: string[],
-) {
+): Promise<void> {
     const currentLabels = await getLabels(octokit, owner, repo, pullNumber);
     await addLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToAdd);
     await removeLabels(octokit, owner, repo, pullNumber, currentLabels, labelsToRemove);
@@ -111,7 +123,7 @@ async function labelPullRequest(
     pendingReviewLabel: string,
     changesRequestedLabel: string,
     approvedLabel: string,
-) {
+): Promise<void> {
     switch (reviewStatus) {
         case CustomPullRequestReviewStatus.DRAFT:
             await updateLabels(

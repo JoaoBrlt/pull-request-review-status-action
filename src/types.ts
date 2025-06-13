@@ -29,18 +29,24 @@ export type OctokitClient = InstanceType<typeof GitHub>;
 
 export type PullRequest = components["schemas"]["pull-request"];
 
-export interface FullPullRequest extends PullRequest {
-    hasBuildFailure: boolean;
-    hasMergeConflicts: boolean;
-    isStale: boolean;
-}
-
 export type PullRequestReview = components["schemas"]["pull-request-review"];
 
 export enum PullRequestReviewState {
     APPROVED = "APPROVED",
     COMMENTED = "COMMENTED",
     CHANGES_REQUESTED = "CHANGES_REQUESTED",
+}
+
+export type CheckRun = components["schemas"]["check-run"];
+
+export interface CustomPullRequest extends PullRequest {
+    customFields: CustomPullRequestFields;
+}
+
+export interface CustomPullRequestFields {
+    hasBuildFailure: boolean;
+    hasMergeConflicts: boolean;
+    isStale: boolean;
 }
 
 export enum CustomPullRequestReviewStatus {

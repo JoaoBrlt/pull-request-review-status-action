@@ -7,7 +7,12 @@ import {
 } from "./types";
 import { Repository } from "@octokit/graphql-schema";
 
-export async function getPullRequest(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+export async function getPullRequest(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+): Promise<PullRequest> {
     const response = await octokit.rest.pulls.get({ owner: owner, repo: repo, pull_number: pullNumber });
     return response.data as PullRequest;
 }
@@ -18,7 +23,7 @@ export async function reviewPullRequest(
     repo: string,
     pullRequest: PullRequest,
     requiredApprovals: number,
-) {
+): Promise<CustomPullRequestReviewStatus> {
     if (pullRequest.draft) {
         return CustomPullRequestReviewStatus.DRAFT;
     }
@@ -42,7 +47,12 @@ export async function reviewPullRequest(
     return getReviewStatus(approvedReviews, changesRequestedReviews, unresolvedReviewComments, requiredApprovals);
 }
 
-function getReviews(octokit: OctokitClient, owner: string, repo: string, pullNumber: number) {
+function getReviews(
+    octokit: OctokitClient,
+    owner: string,
+    repo: string,
+    pullNumber: number,
+): Promise<PullRequestReview[]> {
     return octokit.paginate(octokit.rest.pulls.listReviews, {
         owner: owner,
         repo: repo,
@@ -50,7 +60,7 @@ function getReviews(octokit: OctokitClient, owner: string, repo: string, pullNum
     });
 }
 
-function getLatestReviewPerUser(reviews: PullRequestReview[], author_id: number) {
+function getLatestReviewPerUser(reviews: PullRequestReview[], author_id: number): Map<number, PullRequestReview> {
     const result = new Map<number, PullRequestReview>();
     for (const review of reviews) {
         // Skip if the review is invalid
@@ -75,7 +85,9 @@ function getLatestReviewPerUser(reviews: PullRequestReview[], author_id: number)
     return result;
 }
 
-function groupReviewsByState(latestReviewPerUser: Map<number, PullRequestReview>) {
+function groupReviewsByState(
+    latestReviewPerUser: Map<number, PullRequestReview>,
+): Map<PullRequestReviewState, PullRequestReview[]> {
     const result = new Map<PullRequestReviewState, PullRequestReview[]>();
     for (const review of latestReviewPerUser.values()) {
         const reviewState = review.state as PullRequestReviewState;
@@ -91,7 +103,7 @@ async function countUnresolvedReviewComments(
     repo: string,
     pullNumber: number,
     authorLogin: string,
-) {
+): Promise<number> {
     let result = 0;
 
     let hasNextPage = true;
@@ -136,7 +148,7 @@ function getReviewComments(
     repo: string,
     pullNumber: number,
     cursor: string | null | undefined,
-) {
+): Promise<{ repository: Repository }> {
     const query = `query($owner: String!, $repo: String!, $pull_number: Int!, $cursor: String) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $pull_number) {
@@ -174,7 +186,7 @@ function getReviewStatus(
     changesRequestedReviews: number,
     unresolvedReviewComments: number,
     requiredApprovals: number,
-) {
+): CustomPullRequestReviewStatus {
     if (changesRequestedReviews > 0 || unresolvedReviewComments > 0) {
         return CustomPullRequestReviewStatus.CHANGES_REQUESTED;
     }
