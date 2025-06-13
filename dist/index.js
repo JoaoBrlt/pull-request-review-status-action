@@ -46775,6 +46775,7 @@ function sleep(ms) {
 }
 async function hasBuildFailure(octokit, owner, repo, pullRequest) {
     const checks = await getPullRequestChecks(octokit, owner, repo, pullRequest);
+    console.log("CHECKS:", checks);
     return checks.check_runs.some((check) => check.conclusion === "failure" || check.conclusion === "cancelled" || check.conclusion === "timed_out");
 }
 async function getPullRequestChecks(octokit, owner, repo, pullRequest) {

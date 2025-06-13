@@ -117,6 +117,7 @@ function sleep(ms: number): Promise<void> {
 
 async function hasBuildFailure(octokit: OctokitClient, owner: string, repo: string, pullRequest: PullRequest) {
     const checks = await getPullRequestChecks(octokit, owner, repo, pullRequest);
+    console.log("CHECKS:", checks);
     return checks.check_runs.some(
         (check) =>
             check.conclusion === "failure" || check.conclusion === "cancelled" || check.conclusion === "timed_out",
