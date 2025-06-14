@@ -22,8 +22,9 @@ GitHub Action to label pull requests depending on their review status and send p
     pending-review-label: Pending review
     changes-requested-label: Changes requested
     approved-label: Approved
-
 ```
+
+[See example GitHub Actions workflow](.github/workflows/pull-request-label.yml).
 
 ### Report the pull requests
 
@@ -41,6 +42,8 @@ GitHub Action to label pull requests depending on their review status and send p
     slack-channel: "#pull-requests"
     stale-days: 7
 ```
+
+[See example GitHub Actions workflow](.github/workflows/pull-request-report.yml).
 
 ## Inputs
 

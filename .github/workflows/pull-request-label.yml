@@ -33,9 +33,12 @@ jobs:
       - name: Run the action
         uses: ./
         with:
+          # Common
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-mode: label
           required-approvals: 1
+
+          # Label mode
           pull-number: ${{ inputs.pull_request_number || github.event.pull_request.number }}
           pending-review-label: Pending review
           changes-requested-label: Changes requested

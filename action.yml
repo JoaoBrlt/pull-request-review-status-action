@@ -3,7 +3,7 @@ description: GitHub Action to label pull requests depending on their code review
 author: João Brilhante
 
 branding:
-  icon: lock
+  icon: tag
   color: blue
 
 inputs:
