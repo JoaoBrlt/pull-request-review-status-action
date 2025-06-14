@@ -6,44 +6,44 @@ import tseslint from "typescript-eslint";
 import jest from "eslint-plugin-jest";
 
 export default defineConfig([
-    // Ignored files
-    { ignores: ["**/dist/", "**/node_modules/"] },
+  // Ignored files
+  { ignores: ["**/dist/", "**/node_modules/"] },
 
-    // JavaScript + TypeScript
-    {
-        files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
-        languageOptions: {
-            globals: globals.node,
-        },
+  // JavaScript + TypeScript
+  {
+    files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
+    languageOptions: {
+      globals: globals.node,
     },
-    {
-        files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
-        ...eslint.configs.recommended,
-    },
+  },
+  {
+    files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
+    ...eslint.configs.recommended,
+  },
 
-    // TypeScript
-    ...tseslint.configs.recommendedTypeChecked,
-    {
-        languageOptions: {
-            parserOptions: {
-                projectService: true,
-                tsconfigRootDir: import.meta.dirname,
-            },
-        },
+  // TypeScript
+  ...tseslint.configs.recommendedTypeChecked,
+  {
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
+  },
 
-    // JavaScript
-    {
-        files: ["**/*.{js,cjs,mjs}"],
-        ...tseslint.configs.disableTypeChecked,
-    },
+  // JavaScript
+  {
+    files: ["**/*.{js,cjs,mjs}"],
+    ...tseslint.configs.disableTypeChecked,
+  },
 
-    // Tests
-    {
-        files: ["**/*.test.{js,cjs,mjs,ts,cts,mts}"],
-        ...jest.configs["flat/recommended"],
-    },
+  // Tests
+  {
+    files: ["**/*.test.{js,cjs,mjs,ts,cts,mts}"],
+    ...jest.configs["flat/recommended"],
+  },
 
-    // Prettier
-    prettierConfig,
+  // Prettier
+  prettierConfig,
 ]);
