@@ -1,28 +1,17 @@
 {
   "name": "pull-request-review-status-action",
   "version": "1.0.0",
-  "private": true,
   "description": "GitHub Action to label pull requests depending on their code review status.",
-  "keywords": [
-    "github",
-    "actions",
-    "pull",
-    "request",
-    "code",
-    "review",
-    "status",
-    "tag"
-  ],
+  "license": "GPL-3.0-only",
+  "author": "João Brilhante",
   "homepage": "https://github.com/JoaoBrlt/pull-request-review-status-action",
-  "bugs": {
-    "url": "https://github.com/JoaoBrlt/pull-request-review-status-action/issues"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JoaoBrlt/pull-request-review-status-action.git"
   },
-  "license": "GPL-3.0-only",
-  "author": "João Brilhante",
+  "bugs": {
+    "url": "https://github.com/JoaoBrlt/pull-request-review-status-action/issues"
+  },
   "exports": {
     ".": "./dist/index.js"
   },
@@ -39,9 +28,6 @@
     "test:coverage": "jest --coverage --passWithNoTests",
     "test:watch": "jest --watch",
     "build": "ncc build src/index.ts --out dist --source-map --license licenses.txt"
-  },
-  "engines": {
-    "node": ">=20"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
@@ -69,5 +55,18 @@
     "ts-jest": "^29.4.0",
     "typescript": "5.8.3",
     "typescript-eslint": "^8.34.0"
+  },
+  "keywords": [
+    "actions",
+    "code",
+    "github",
+    "label",
+    "pull",
+    "request",
+    "review",
+    "status"
+  ],
+  "engines": {
+    "node": ">=20"
   }
 }

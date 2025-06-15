@@ -12,13 +12,10 @@ export default defineConfig([
   // JavaScript + TypeScript
   {
     files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
+    ...eslint.configs.recommended,
     languageOptions: {
       globals: globals.node,
     },
-  },
-  {
-    files: ["**/*.{js,cjs,mjs,ts,cts,mts}"],
-    ...eslint.configs.recommended,
   },
 
   // TypeScript

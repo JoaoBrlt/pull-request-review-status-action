@@ -1,3 +1,5 @@
+# Untracked files, see https://git-scm.com/docs/gitignore
+
 # Dependencies
 node_modules/
 
