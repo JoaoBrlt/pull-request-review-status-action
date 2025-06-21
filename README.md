@@ -95,3 +95,7 @@ None.
 
 [ci-badge-url]: https://github.com/JoaoBrlt/pull-request-review-status-action/actions/workflows/ci.yml/badge.svg
 [ci-workflow-url]: https://github.com/JoaoBrlt/pull-request-review-status-action/actions/workflows/ci.yml
+
+## License
+
+This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) file for details.
