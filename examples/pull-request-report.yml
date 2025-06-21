@@ -4,8 +4,11 @@ on:
   # When manually triggered
   workflow_dispatch:
 
+  # Every day at 12:00 UTC
+  schedule:
+    - cron: 0 12 * * *
+
 permissions:
-  contents: read # To clone the repository
   pull-requests: read # To list the open pull requests
   checks: read # To list the check runs of a pull request
 
@@ -18,8 +21,8 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@v4
 
-      - name: Run the action
-        uses: ./
+      - name: Report the pull requests
+        uses: JoaoBrlt/pull-request-review-status-action@v1
         with:
           # Common
           github-token: ${{ secrets.GITHUB_TOKEN }}

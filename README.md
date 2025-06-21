@@ -15,7 +15,7 @@ GitHub Action to label pull requests depending on their review status and send p
     # Common
     github-token: ${{ secrets.GITHUB_TOKEN }}
     run-mode: label
-    required-approvals: 2
+    required-approvals: 1
     
     # Label mode
     pull-number: ${{ github.event.pull_request.number }}
@@ -24,7 +24,7 @@ GitHub Action to label pull requests depending on their review status and send p
     approved-label: Approved
 ```
 
-[See example GitHub Actions workflow](.github/workflows/pull-request-label.yml).
+See example GitHub Actions workflow: [pull-request-label.yml](examples/pull-request-label.yml).
 
 ### Report the pull requests
 
@@ -43,7 +43,24 @@ GitHub Action to label pull requests depending on their review status and send p
     stale-days: 7
 ```
 
-[See example GitHub Actions workflow](.github/workflows/pull-request-report.yml).
+See example GitHub Actions workflow: [pull-request-report.yml](examples/pull-request-report.yml).
+
+## Permissions
+
+### Label mode
+
+```yaml
+permissions:
+  pull-requests: write # To label the pull requests
+```
+
+### Report mode
+
+```yaml
+permissions:
+  pull-requests: read # To list the open pull requests
+  checks: read # To list the check runs of a pull request
+```
 
 ## Inputs
 

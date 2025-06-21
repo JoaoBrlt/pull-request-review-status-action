@@ -1,0 +1,41 @@
+name: Pull Request - Label
+
+on:
+  # When manually triggered
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request number
+        required: true
+        type: string
+
+  # When a pull request is opened, synchronized, reopened, marked as ready for review, converted to draft
+  pull_request_target:
+    types: ["opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"]
+
+  # When a pull request review is submitted, edited, or dismissed
+  pull_request_review:
+    types: ["submitted", "edited", "dismissed"]
+
+permissions:
+  pull-requests: write # To label the pull requests
+
+jobs:
+  label:
+    name: Label
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Label the pull request
+        uses: JoaoBrlt/pull-request-review-status-action@v1
+        with:
+          # Common
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-mode: label
+          required-approvals: 1
+
+          # Label mode
+          pull-number: ${{ inputs.pull_request_number || github.event.pull_request.number }}
+          pending-review-label: Pending review
+          changes-requested-label: Changes requested
+          approved-label: Approved
